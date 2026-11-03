@@ -1,5 +1,9 @@
 # Fusion Hat driver
 
+For the experimental Orange Pi Zero 3W / Armbian MCU readout milestone, use
+[the build-only and temporary-session procedure](orange-pi-zero3w-bringup.md). The install
+and actuator debug commands below are not that procedure.
+
 ## Install
 
 ```bash

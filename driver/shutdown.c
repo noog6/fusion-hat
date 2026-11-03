@@ -13,6 +13,13 @@
 
 #include "main.h"
 
+/* Load-time only: keep the existing Raspberry Pi behavior unless opted out. */
+static bool disable_auto_shutdown;
+module_param(disable_auto_shutdown, bool, 0444);
+MODULE_PARM_DESC(disable_auto_shutdown,
+                "Disable automatic host shutdown actions (default: false); "
+                "does not disable independent HAT firmware protections");
+
 /**
  * fusion_hat_check_hardware_shutdown_request - Check for hardware shutdown requests
  * @dev: Fusion HAT device structure
@@ -45,10 +52,13 @@ int fusion_hat_check_hardware_shutdown_request(struct fusion_hat_dev *dev)
  * @dev: Fusion HAT device structure
  * @request_type: Shutdown request type
  * 
- * Logs the shutdown reason and prepares the system for shutdown.
- * The actual shutdown is currently commented out for safety during testing.
+ * Logs the shutdown reason and powers off the host unless explicitly disabled.
  */
 void fusion_hat_execute_shutdown(struct fusion_hat_dev *dev, int request_type) {
+    /* Also guard this exported entry point, not just the periodic caller. */
+    if (disable_auto_shutdown)
+        return;
+
     /* Log shutdown reason based on request type */
     switch (request_type) {
     case SHUTDOWN_REQUEST_BATTERY:
@@ -77,8 +87,13 @@ void fusion_hat_execute_shutdown(struct fusion_hat_dev *dev, int request_type) {
  * This function is typically scheduled to run periodically or in response to events.
  */
 void fusion_hat_shutdown_request_work(struct fusion_hat_dev *dev) {
+    int shutdown_request;
+
+    if (disable_auto_shutdown)
+        return;
+
     /* Check for hardware shutdown requests */
-    int shutdown_request = fusion_hat_check_hardware_shutdown_request(dev);
+    shutdown_request = fusion_hat_check_hardware_shutdown_request(dev);
     
     /* Execute shutdown only if there is a valid request */
     if (shutdown_request != SHUTDOWN_REQUEST_NONE) {
