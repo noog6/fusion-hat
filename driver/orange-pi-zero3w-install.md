@@ -3,9 +3,12 @@
 This is the second milestone, based on merged PR #2. It targets **only** Orange
 Pi Zero 3W / Allwinner A733, aarch64, Armbian 26.8.3 / Ubuntu resolute, kernel
 `6.6.98-vendor-sun60iw2`, Python 3.14.4 and a directly connected Fusion HAT+.
-Persistent installation, input events, Python access and servo operation are
-**pending operator validation**. The first milestone's operator-reported build,
-temporary binding, firmware/battery/USR state and cleanup results are recorded
+The operator has verified installation and binding after reboot with both policy
+flags enabled, the expected scoped permissions, and non-root Python 3.14.4
+firmware/battery access and USR press/release callbacks. Permission checks after
+device recreation and the single-servo experiment remain **pending operator
+validation**. These are operator-provided hardware results, not cloud tests.
+The first milestone's temporary build/bind/readout/cleanup results are recorded
 in [the temporary bring-up guide](orange-pi-zero3w-bringup.md).
 
 The operator separately confirmed vendor symbol `twi0` and live bus-0 node
@@ -82,16 +85,15 @@ Missing prerequisites and existing conflicting module/options/ownership stop
 the operation with an explanation. Resolve these explicitly rather than using
 forced unbind/unload or overwriting configuration.
 
-An operator-reported build of the new driver and the installer/offline overlay
-check passed on this target. Installation then failed in the initramfs hook and
-reported successful rollback; persistent boot remains unverified. The hook now
-handles initramfs-tools' already-copied-file status and verifies the staged
+The operator verified the new driver build and installer/offline overlay check
+on this target. An initial initramfs-hook failure rolled back; after the hook
+fix, installation and binding after an explicit reboot passed. The hook handles
+initramfs-tools' already-copied-file status only after verifying the staged
 policy matches exactly, while keeping genuine copy/module errors fatal.
-After a completed rollback, pull the corrected checkout and repeat check/install;
-there is no need to rebuild an unchanged driver binary or reboot first. Missing
-firmware warnings from unrelated built-in drivers are separate from a fatal
-`fusion-hat-core` hook error. If a retry fails, preserve the full output,
-including the hook's module/policy-specific diagnostic.
+Missing firmware warnings from unrelated built-in drivers are separate from a
+fatal `fusion-hat-core` hook error. On failure, preserve the full output,
+including the hook's module/policy-specific diagnostic, and inspect rollback
+status before rebooting.
 
 The installation owns only:
 
@@ -173,7 +175,8 @@ managed client (removal zeros PWM and changes LED state):
 
 ```bash
 printf '0-0017\n' | sudo tee /sys/bus/i2c/drivers/fusion_hat/unbind &&
-printf '0-0017\n' | sudo tee /sys/bus/i2c/drivers/fusion_hat/bind
+printf '0-0017\n' | sudo tee /sys/bus/i2c/drivers/fusion_hat/bind &&
+sudo udevadm settle
 ```
 
 Repeat flag/binding/P0 ownership checks and rediscover the potentially new input
@@ -223,8 +226,15 @@ This is a separate operator action, never run by the helper. Recheck package
 versions first if the interpreter or apt candidates have changed; do not upgrade
 the interpreter/kernel to bypass a mismatch. Then rerun the venv helper and
 readout/event check above as the non-root runtime user.
-Python 3.14.4 support remains pending
-actual installation/import results on this target.
+
+After installing those matching development packages, the operator successfully
+built and installed `evdev 2.0.0` (`cp314`, aarch64) and the local `fusion_hat
+1.14.0` package in the existing Python 3.14.4 venv from commit `41115e5`.
+Core imports passed without constructing devices. The non-root readout check
+reported firmware `1.0.2`, battery `8.39 V`, `Charging`, estimated `99%`, and actual
+USR press and release callbacks from the Fusion input device. This validates
+that readout/event path on the stated target; servo operation and permission
+reapplication after device recreation remain unverified.
 
 Core imports are `fusion_hat.device`, `battery`, `user_button`, `pwm` and `servo`.
 They do not require `RPi.GPIO` or voice/audio packages. The readout script does
@@ -238,7 +248,9 @@ pair is a failure, not an unpressed-button success.
 Use **one unloaded servo on P0**, with all other actuators disconnected and no
 other hardware processes. Confirm the servo's manufacturer-specified suitable
 **50 Hz pulse range**, neutral pulse, power/wiring and mechanical clearance.
-Do not infer safe angles from the library's generic 500–2500 us mapping.
+The existing `Servo` class defines a 500–2500 us mapping at 50 Hz, with 1500 us
+at its nominal center. These are library defaults; actual servo travel varies.
+The first test uses only center +/- 50 us, not the range endpoints.
 
 P0..P3 share a timer, as do P4..P7 and P8..P11. A frequency write changes its
 whole timer group. The script refuses any enabled channel in P0..P3 and requires
@@ -251,12 +263,14 @@ invoke (substitute the verified values otherwise):
 
 ```bash
 "$venv_python" examples/orange_pi_zero3w_single_servo.py \
-  --min-us 1000 --max-us 2000 --center-us 1500 --step-us 50 \
+  --min-us 500 --max-us 2500 --center-us 1500 --step-us 50 \
   --dwell 0.5 --confirm-servo-range
 ```
 
 This uses the existing `Servo` interface, with pulse widths instead of angle
-assumptions: neutral, +step, neutral, -step, neutral, at 50 Hz. The global
+assumptions: 1500, 1550, 1500, 1450, 1500 us with the example arguments, at 50 Hz.
+The min/max arguments declare the confirmed envelope; they are not commanded
+positions. The global
 envelope is 500..2500 us, step at most 100 us, and each dwell 0.2..2 seconds.
 Those code limits are not proof that any particular servo is suitable.
 
