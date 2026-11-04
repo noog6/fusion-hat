@@ -1,0 +1,3 @@
+# Only the opt-in machine's PCM0 and card control; no other ALSA/input/I2C grants.
+ACTION=="add|change", SUBSYSTEM=="sound", KERNEL=="controlC*|pcmC*D0p|pcmC*D0c", KERNELS=="fusion-hat-audio", DRIVERS=="sunxi-snd-mach", GROUP="fusionhat-audio", MODE="0660"
+ACTION=="add|bind|change", SUBSYSTEM=="i2c", KERNEL=="0-0017", DRIVER=="fusion_hat", RUN+="/usr/libexec/fusion-hat-audio-permissions"

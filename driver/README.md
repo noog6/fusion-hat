@@ -1,5 +1,8 @@
 # Fusion Hat driver
 
+For the opt-in audio overlay, separate installation and bounded ALSA tests,
+see [Orange Pi Zero 3W / Armbian experimental audio](orange-pi-zero3w-audio.md).
+
 For persistent experimental core setup and separate non-root Python/single-servo
 checks, see [Orange Pi Zero 3W / Armbian installation](orange-pi-zero3w-install.md).
 

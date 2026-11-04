@@ -1,0 +1,37 @@
+/dts-v1/;
+/ {
+    compatible = "xunlong,orangepi-zero3w";
+    soc@3000000 {
+        pio: pinctrl@2000000 { compatible = "test,pinctrl"; };
+        i2s0_plat: i2s0_plat@2532000 {
+            compatible = "allwinner,sunxi-snd-plat-i2s";
+            #sound-dai-cells = <0>;
+            status = "disabled";
+        };
+        i2s0_mach: i2s0_mach {
+            compatible = "allwinner,sunxi-snd-mach";
+            soundcard-mach,name = "allwinner-ac101";
+            soundcard-mach,slot-num = <4>;
+            soundcard-mach,slot-width = <16>;
+            status = "okay";
+            soundcard-mach,cpu { sound-dai = <&i2s0_plat>; };
+            soundcard-mach,codec { sound-dai = <&ac101>; };
+        };
+        ac101: ac101 { #sound-dai-cells = <0>; status = "disabled"; };
+        twi0: twi@2510000 {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            status = "okay";
+            fusion_hat@17 {
+                compatible = "sunfounder,fusion_hat";
+                sunfounder,experimental-core;
+                reg = <0x17>;
+            };
+        };
+        hdmi {
+            compatible = "test,hdmi";
+            status = "okay";
+            test-preserve = <123>;
+        };
+    };
+};
