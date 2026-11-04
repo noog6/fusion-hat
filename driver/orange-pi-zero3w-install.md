@@ -7,8 +7,10 @@ The operator has verified installation and binding after reboot with both policy
 flags enabled, the expected scoped permissions, and non-root Python 3.14.4
 firmware/battery access and USR press/release callbacks. The same policy,
 permissions and non-root readout/event checks also passed after a controlled
-unbind/rebind. The single-servo experiment remains **pending operator
-validation**. These are operator-provided hardware results, not cloud tests.
+unbind/rebind. The operator also observed bounded P0 servo movement consistent
+with the test sequence and a disabled readback after normal completion.
+Physical pulse-stop verification remains **pending operator validation**.
+These are operator-provided hardware results, not cloud tests.
 The first milestone's temporary build/bind/readout/cleanup results are recorded
 in [the temporary bring-up guide](orange-pi-zero3w-bringup.md).
 
@@ -241,8 +243,8 @@ built and installed `evdev 2.0.0` (`cp314`, aarch64) and the local `fusion_hat
 Core imports passed without constructing devices. The non-root readout check
 reported firmware `1.0.2`, battery `8.39 V`, `Charging`, estimated `99%`, and actual
 USR press and release callbacks from the Fusion input device. The same check
-subsequently passed after device recreation as recorded above. Servo operation
-remains unverified.
+subsequently passed after device recreation as recorded above. The bounded P0
+servo experiment is recorded separately below.
 
 Core imports are `fusion_hat.device`, `battery`, `user_button`, `pwm` and `servo`.
 They do not require `RPi.GPIO` or voice/audio packages. The readout script does
@@ -292,6 +294,15 @@ successful I2C write or the physical waveform. SIGKILL, a crash in native code,
 power loss or failed I2C/sysfs writes cannot guarantee cleanup; disconnect power
 if cleanup is uncertain. Do not test stall/load, broad sweeps or multiple servos.
 
+The operator ran the example command above without sudo. The script printed all
+five requested pulse widths, completed normally, reported P0 disabled, and a
+separate `pwm0/enable` read returned `0`. The operator observed centering, small
+opposing movements and return to center, described as controlled twitching and
+consistent with the expected pattern. This verifies visible actuation and the
+normal-completion disabled readback on this target. Physical pulse widths,
+frequency and pulse cessation were not measured. Exception/interrupt cleanup
+has mocked test coverage but has not been tested on hardware.
+
 ## 6. Uninstall, rollback and boot recovery
 
 Disconnect actuators and stop all hardware users first:
@@ -324,6 +335,8 @@ old/incorrect module or remove the shutdown policy to make binding succeed.
 
 Record the source SHA, installation/reboot logs, flags, permissions after boot
 and rebind, non-root Python/event results, confirmed servo limits, observed
-motion and physical output cleanup. This milestone remains pending until those
-results are supplied; mocks and host compilation do not establish hardware or
-Raspberry Pi regression coverage.
+motion and physical output cleanup. Installation/reboot, device recreation,
+non-root readouts/events, bounded servo movement and normal-completion disabled
+readback are operator-verified as recorded above. Physical pulse-stop
+verification remains pending; mocks and host compilation do not establish
+hardware or Raspberry Pi regression coverage.
