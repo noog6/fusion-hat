@@ -196,7 +196,12 @@ log in again for group membership. No script reboots or tests audio automaticall
 
 ## 3. Enumeration and non-root access
 
+After login, return to the checkout and reactivate the intended venv. The
+reported test checkout is `~/workarea/fusion-hat`; adjust that path if yours is
+elsewhere. A script path relative to the home directory will not find the example.
+
 ```bash
+cd ~/workarea/fusion-hat
 id -nG
 cat /sys/module/fusion_hat/parameters/{disable_auto_shutdown,restrict_controls}
 readlink -f /sys/bus/i2c/devices/0-0017/driver
@@ -251,14 +256,18 @@ The explicit tone uses 440 Hz, 1% digital peak (-40 dBFS), identical slots,
 ```bash
 "$venv_python" examples/orange_pi_zero3w_audio.py playback
 cat /sys/class/fusion_hat/fusion_hat/speaker
-"$venv_python" examples/orange_pi_zero3w_audio.py replay --input "$recording/microphone.wav"
+"$venv_python" examples/orange_pi_zero3w_audio.py replay --input "$recording/microphone.wav" --channel 0
 cat /sys/class/fusion_hat/fusion_hat/speaker
 ```
 
 The helper requires PCM RUNNING with `owner_pid` equal to its own `aplay` child,
 waits another 50 ms, enables the existing speaker
 switch, then attempts mute before normal PCM closure. Replay bounds peak to
-1% and retains both slots. Expect an audible short tone, intelligible speech on
+1%. `--channel 0` duplicates that captured channel into both output slots for
+monitoring; `--channel 1` selects the other one. This does not change the raw
+stereo recording or establish a hardware downmix policy. Without the option,
+replay preserves stereo, which can be silent if the amplifier uses the empty
+slot. Expect an audible short tone, intelligible speech on
 replay, and speaker readback `0` after each action. Do not raise amplitude to
 bypass a failed initial result. The retained WAV can also be heard on a known
 working system to check intelligibility independently of Orange Pi playback.
@@ -311,18 +320,45 @@ The operator then ran `check --runtime-user` from commit `fbd3f02` on the
 Orange Pi target. It reported that audio prerequisites and offline composition
 passed against the installed DTB and enabled overlays, with no installation or
 activation performed. This clears that preflight gate; runtime audio binding,
-permissions and signal behaviour remain untested.
+permissions and signal behaviour were not tested by that check.
+
+The operator subsequently installed from the checkout, rebooted and reported:
+
+- Both MCU flags `Y`, Fusion binding and firmware `1.0.2` persisted.
+- `fusionhataudio` enumerated for playback and capture; HDMI remained listed.
+- The intended user had `fusionhat-audio` membership. Speaker, controlC0,
+  PCM0 playback and capture nodes were `660 root fusionhat-audio` after reboot.
+- Non-root capture negotiated 48000 / S32_LE / stereo and returned five seconds.
+  Channel 0 peak/RMS were 0.314636/0.014814; channel 1 was zero.
+- Tone/replay processes completed and speaker-off cache readback was `0`.
+  The operator confirmed both tone and replay were silent; audible playback and
+  intelligibility are not passed checks. Stereo replay's empty second slot is
+  one hypothesis for replay, not a demonstrated cause, and cannot explain a
+  silent tone that already duplicates data into both slots. Selected-channel
+  monitoring keeps the same 1% peak for an independent replay check.
+- Mixer controls reported clock delay 0, clock keep off, loopback off, RX sync
+  off, TX hub off and TX trigger bypass off. These match normal DMA operation;
+  no playback-volume/mute control was exposed. The operator reported that the
+  audio switch position matches the working Raspberry Pi reference.
+
+The startup `No 'sound-dai' property` message is consistent with the intentional
+dummy endpoint fallback. Missing clock-post-delay/default-format warnings and
+duplicate debugfs entries were also reported, including duplicate entries for
+HDMI. Card registration/capture succeeded; these messages alone do not identify
+the cause of silent playback. Preserve them alongside mixer/pin/physical results.
 
 Focused tests cover real composition, MCU/HDMI/PB4 preservation, conflicts,
 missing prerequisites, MCU policy gates, repeat installation, ownership,
 rollback, scoped grants, explicit card/profile selection and mocked stream
 cleanup including Ctrl-C. The existing suite is run too. Cloud Python is
-3.12/x86_64; target Python 3.14/audio remains pending. No hardware installer,
+3.12/x86_64; target Python 3.14 capture/stream completion now has the operator
+results above. No hardware installer,
 PCM stream or speaker operation was run in the cloud.
 
 Reference capture and Orange Pi pin/DAI results above are operator-provided
-hardware evidence. Target audio binding/permissions, audible playback,
-intelligible capture, physical timing/cleanup and persistence remain pending.
+hardware evidence. Target binding, permission metadata and stream completion
+after reboot are reported above. Audible playback, intelligible capture and
+physical timing/cleanup remain pending.
 The Pi implementation/installer/overlay are unchanged; Raspberry Pi hardware
 regression testing was not performed. No STT/TTS, wake-word, runtime, servo,
 automatic shutdown or general-purpose host GPIO changes are included.

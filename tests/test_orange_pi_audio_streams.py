@@ -75,6 +75,24 @@ class Streams(unittest.TestCase):
         self.assertLessEqual(max(abs(v) for v in data), STREAM.PEAK)
         self.assertFalse(any(data[:int(.3 * STREAM.RATE) * 2]))
 
+    def test_replay_can_monitor_active_left_capture_in_both_slots_without_changing_source(self):
+        source = array.array('i', [100000, 0, -200000, 0, 300000, 0])
+        before = source.tobytes()
+        monitor = STREAM.replay_samples(source, 0)
+        self.assertEqual(monitor[::2], monitor[1::2])
+        self.assertTrue(any(monitor[1::2]))
+        self.assertEqual(max(abs(v) for v in monitor), STREAM.PEAK)
+        self.assertEqual(source.tobytes(), before)
+        self.assertFalse(any(STREAM.replay_samples(source)[1::2]))
+        with self.assertRaisesRegex(ValueError, 'silent'):
+            STREAM.replay_samples(source, 1)
+
+    def test_replay_selected_right_channel_is_duplicated_and_bounded(self):
+        source = array.array('i', [0, -(2 ** 31), 0, 2 ** 31 - 1])
+        monitor = STREAM.replay_samples(source, 1)
+        self.assertEqual(monitor[::2], monitor[1::2])
+        self.assertLessEqual(max(abs(v) for v in monitor), STREAM.PEAK)
+
     def test_normal_playback_uses_explicit_pcm_and_mutes_before_pcm_close(self):
         proc = Process(self.events)
         def factory(args, **kwargs):

@@ -97,6 +97,19 @@ def summarize(samples):
     print('Levels are diagnostic only; listen to confirm intelligible speech.')
 
 
+def replay_samples(samples, channel=None):
+    """Prepare a bounded monitor copy; never alter the raw capture."""
+    if channel not in (None, 0, 1):
+        raise ValueError('Select capture channel 0 or 1')
+    if channel is not None:
+        samples = array.array('i', (v for sample in samples[channel::2] for v in (sample, sample)))
+    highest = max(abs(v) for v in samples)
+    if not highest:
+        raise ValueError('Selected recording/channel is silent')
+    return array.array('i', [0] * int(.3 * RATE) * 2) + \
+        array.array('i', (int(v * PEAK / highest) for v in samples))
+
+
 def playback(samples, pcm, speaker, status, factory=subprocess.Popen, sleep=time.sleep):
     # Guard and cleanup precede every process/enable operation.
     if speaker.read_text().strip() != '0':
@@ -170,6 +183,8 @@ def main():
     parser.add_argument('action', choices=('check', 'capture', 'playback', 'replay'))
     parser.add_argument('--output', type=Path)
     parser.add_argument('--input', type=Path)
+    parser.add_argument('--channel', type=int, choices=(0, 1),
+                        help='Replay one captured channel in both output slots; raw WAV is unchanged')
     args = parser.parse_args()
     if os.geteuid() == 0:
         parser.error('Run the ALSA checks as the configured runtime user, without sudo')
@@ -177,6 +192,8 @@ def main():
         parser.error('capture requires --output for a new WAV file')
     if args.action == 'replay' and args.input is None:
         parser.error('replay requires --input')
+    if args.channel is not None and args.action != 'replay':
+        parser.error('--channel applies only to replay')
     def terminate(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)
@@ -189,13 +206,9 @@ def main():
         elif args.action in ('playback', 'replay'):
             samples = tone()
             if args.action == 'replay':
-                samples = wav_samples(args.input)
-                highest = max(abs(v) for v in samples)
-                if not highest:
-                    raise ValueError('Recording is silent')
-                # Bound replay to the same peak as the test tone; add pre-roll.
-                samples = array.array('i', [0] * int(.3 * RATE) * 2) + \
-                          array.array('i', (int(v * PEAK / highest) for v in samples))
+                samples = replay_samples(wav_samples(args.input), args.channel)
+                if args.channel is not None:
+                    print(f'Monitoring capture channel {args.channel} in both playback slots; peak remains 1%.')
             playback(samples, pcm, speaker, status)
         else:
             print('Non-root device access and speaker-off checks passed; no stream started.')
