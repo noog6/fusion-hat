@@ -1,7 +1,7 @@
 /**
  * @file adc.c
  * @brief Fusion Hat ADC Driver
- * 
+ *
  * This module provides ADC reading functionality and IIO device integration
  * for the Fusion Hat, supporting 4 channels of analog input with proper scaling.
  */
@@ -12,9 +12,40 @@
 #include <linux/i2c.h>
 #include <linux/mutex.h>
 
+/**
+ * @brief Read ADC value from specified channel
+ * @param client I2C client
+ * @param channel ADC channel (0-3)
+ * @param value Pointer to store the read result
+ * @return 0 on success, negative error code on failure
+ */
+int fusion_hat_read_adc(struct i2c_client *client, int channel, uint16_t *value)
+{
+    uint8_t reg;
+    int ret;
+
+    if (!client || !value) {
+        return -EINVAL;
+    }
+
+    if (channel < 0 || channel > 3) {
+        return -EINVAL;
+    }
+
+    reg = CMD_READ_ADC_BASE + (channel * 2);
+    ret = fusion_hat_i2c_read_word(client, reg, value, true);
+
+    if (ret < 0) {
+        return ret;
+    }
+
+    return 0;
+}
+
+#if IS_REACHABLE(CONFIG_IIO)
+
 // Device name
 #define FUSION_HAT_ADC_NAME "fusion-hat"
-
 
 static int fusion_hat_iio_read_raw(struct iio_dev *indio_dev, struct iio_chan_spec const *chan,
                                 int *val, int *val2, long mask);
@@ -59,36 +90,6 @@ static const struct iio_chan_spec fusion_hat_iio_channels[] = {
 static const struct iio_info fusion_hat_iio_info = {
     .read_raw = fusion_hat_iio_read_raw,
 };
-
-/**
- * @brief Read ADC value from specified channel
- * @param client I2C client
- * @param channel ADC channel (0-3)
- * @param value Pointer to store the read result
- * @return 0 on success, negative error code on failure
- */
-int fusion_hat_read_adc(struct i2c_client *client, int channel, uint16_t *value)
-{
-    uint8_t reg;
-    int ret;
-    
-    if (!client || !value) {
-        return -EINVAL;
-    }
-    
-    if (channel < 0 || channel > 3) {
-        return -EINVAL;
-    }
-    
-    reg = CMD_READ_ADC_BASE + (channel * 2);
-    ret = fusion_hat_i2c_read_word(client, reg, value, true);
-    
-    if (ret < 0) {
-        return ret;
-    }
-    
-    return 0;
-}
 
 /**
  * @brief Read raw data from IIO device
@@ -179,6 +180,23 @@ void fusion_hat_adc_remove(struct fusion_hat_dev *dev)
         dev->iio_devs[0] = NULL;
     }
 }
+
+#else
+
+/* External ADC sysfs is optional; battery monitoring uses separate MCU reads. */
+int fusion_hat_adc_probe(struct fusion_hat_dev *dev)
+{
+    dev_info(&dev->client->dev,
+             "IIO unavailable; external ADC interface disabled\n");
+    return 0;
+}
+
+void fusion_hat_adc_remove(struct fusion_hat_dev *dev)
+{
+    (void)dev;
+}
+
+#endif /* IS_REACHABLE(CONFIG_IIO) */
 
 // Export functions for use by other modules
 EXPORT_SYMBOL(fusion_hat_read_adc);
