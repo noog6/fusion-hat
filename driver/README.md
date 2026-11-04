@@ -1,5 +1,8 @@
 # Fusion Hat driver
 
+For the experimental audio design findings, blockers and read-only target checks,
+see [Orange Pi Zero 3W / Armbian audio investigation](orange-pi-zero3w-audio.md).
+
 For persistent experimental core setup and separate non-root Python/single-servo
 checks, see [Orange Pi Zero 3W / Armbian installation](orange-pi-zero3w-install.md).
 
