@@ -5,10 +5,11 @@ This explicitly opt-in audio experiment builds on merged PR #3 at `v1` commit
 Ubuntu resolute, kernel `6.6.98-vendor-sun60iw2`, directly mounted Fusion HAT+.
 Read the [core guide](orange-pi-zero3w-install.md) first. Audible manual and
 updated-helper playback are operator-confirmed at the bounded 5% test level.
-Microphone intelligibility and physical/interruption cleanup remain pending.
-Missing chip part numbers do
-**not** block this bounded experiment: the working Pi implementation and live reference data
-establish one operating profile, without identifying the chips.
+Fresh microphone capture and channel-0 replay are also confirmed intelligible,
+but very quiet. Physical/interruption cleanup remains unverified. Missing chip
+part numbers do **not** block this bounded experiment: the working Pi
+implementation and live reference data establish one operating profile,
+without identifying the chips.
 
 ## Evidence and selected profile
 
@@ -74,6 +75,14 @@ change or a fixed card index. The operator subsequently replayed that persistent
 quiet but audible. This validates that playback path without attributing the
 original failure to any single changed variable.
 
+The operator then made a fresh five-second capture with the updated helper and
+replayed channel 0 through the HAT at the bounded 5% monitor level. Both ALSA
+directions reported exact 48000 / S32_LE / stereo; playback reported its own
+RUNNING process and ended with cached speaker readback `0`. The operator
+explicitly confirmed the recorded spoken phrase was understandable, but very
+quiet. This passes the bounded capture/replay listening check, not a general
+volume, channel-routing, format or microphone-quality claim.
+
 | Property | Selected configuration |
 | --- | --- |
 | PCM | 48000 Hz, S32_LE, two interleaved channels; 32-bit container, not an ADC precision claim |
@@ -121,7 +130,7 @@ was not evidence that pinctrl support was missing. Registered DAIs were
 | Capture slot/downmix choice or amplifier channel selection | Retain both capture slots and duplicate playback samples |
 | Actual Orange Pi clock waveforms | Not measured; derived settings only |
 | Audible playback | Manual and updated explicit-device helper 5% tone confirmed quiet but audible |
-| Intelligible capture | Nonzero PCM data reported; listening confirmation pending |
+| Intelligible capture | Fresh five-second capture, channel-0 replay through HAT confirmed understandable but very quiet |
 | Pi GPIO16 SDMODE dependency on this HAT revision | Not transplanted; manual Orange Pi playback succeeded with the existing MCU control |
 
 The Pi codec delays GPIO16 amplifier enable by 5 ms. That does not establish a
@@ -357,13 +366,14 @@ replay preserves stereo, which can be silent if the amplifier uses the empty
 slot. The operator confirmed the persistent 5% tone was quiet but audible
 through the updated helper. Report whether the recorded phrase is intelligible and
 speaker readback is `0` after each action. A tone does not validate the mic.
-The latest capture's channel 0 peak/RMS were 0.339319/0.015674. Normalizing its
-peak to 5% reduces all samples by about 16.6 dB and gives an estimated monitor
-RMS of 0.00231 (0.23% of full scale). This explains why replay may be much quieter
-than the tone; it does not establish whether speech was captured. Listen to the
-unchanged raw WAV on a known working computer/audio device to check microphone
-intelligibility independently of this bounded HAT monitor level. Keep that
-outcome separate from audible tone playback; no automatic gain increase follows.
+The latest capture's channel 0 peak/RMS were 0.315075/0.019609. Normalizing its
+peak to 5% reduces all samples by about 16.0 dB and gives an estimated monitor
+RMS of 0.00311 (0.31% of full scale). This calculation is consistent with quiet
+replay; it does not isolate every cause of low volume. The operator confirmed
+the fresh spoken phrase was intelligible through the HAT, but very quiet.
+Independent listening to the unchanged raw WAV on a known working audio device
+can assess capture separately from this bounded monitor level. No automatic
+gain increase or broader audio-quality claim follows from this result.
 
 Normal completion, exceptions, Ctrl-C and SIGTERM attempt speaker-off and stop
 only the helper's child process. Child sessions prevent terminal Ctrl-C from
@@ -441,7 +451,16 @@ The operator subsequently installed from the checkout, rebooted and reported:
   Selected-channel-0 replay reached the explicit HAT PCM at exact 48000 /
   S32_LE / stereo, reported its own RUNNING owner and completed with speaker
   cached readback `0`. That replay was not heard; speech intelligibility
-  remains unverified. Nonzero levels are not a substitute for listening.
+  was not established by that attempt. Nonzero levels are not a substitute
+  for listening.
+- The operator preserved the earlier recording, then captured a fresh five
+  seconds. Channel 0 peak/RMS were 0.315075/0.019609; channel 1 were
+  0.314299/0.013881. Capture and channel-0 replay negotiated exact 48000 /
+  S32_LE / stereo through the explicit HAT PCM. Replay reported its own RUNNING
+  process and completed with speaker cached readback `0`. The operator confirmed
+  audible playback and that the spoken phrase was understandable, but very
+  quiet. This is hardware listening evidence for the fresh recording and
+  selected-channel monitor path, not a claim about both capture channels.
 - Mixer controls reported clock delay 0, clock keep off, loopback off, RX sync
   off, TX hub off and TX trigger bypass off. These match normal DMA operation;
   no playback-volume/mute control was exposed. The operator reported that the
@@ -476,10 +495,11 @@ PCM stream or speaker operation was run in the cloud.
 
 Reference capture and Orange Pi pin/DAI results above are operator-provided
 hardware evidence. Target binding, permission metadata and stream completion
-after reboot and audible manual/updated-helper playback are reported above.
-Intelligible microphone speech, physical waveforms/cleanup, hardware
-interruption cleanup and permission reapplication after later audio-device
-recreation remain pending. Speaker-off cached readback after replay is reported;
+after reboot, audible manual/updated-helper playback and intelligible fresh
+microphone capture/channel-0 replay are reported above. Very quiet monitor
+volume remains a limitation. Physical waveforms/cleanup, hardware interruption
+cleanup and permission reapplication after later audio-device recreation remain
+pending. Speaker-off cached readback after replay is reported;
 continue checking it after each action. A cached value is not physical cleanup.
 The Pi implementation/installer/overlay are unchanged; Raspberry Pi hardware
 regression testing was not performed. No STT/TTS, wake-word, runtime, servo,
