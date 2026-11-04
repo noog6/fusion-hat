@@ -1,0 +1,94 @@
+/dts-v1/;
+/plugin/;
+
+/* Experimental transport profile reproduced from the working Pi implementation:
+ * I2S, NB_NF, CPU clocks, 48 kHz / S32_LE / stereo, 2 x 32-bit slots.
+ * No claim about audio-chip identity. Applications must use this one profile.
+ */
+/ {
+    compatible = "xunlong,orangepi-zero3w";
+
+    fragment@0 {
+        target = <&pio>;
+        __overlay__ {
+            fusion_audio_bclk: fusion-hat-audio-bclk {
+                pins = "PB5";
+                function = "i2s0_bclk";
+                allwinner,drive = <1>;
+                bias-disable;
+            };
+            fusion_audio_lrck: fusion-hat-audio-lrck {
+                pins = "PB6";
+                function = "i2s0_lrck";
+                allwinner,drive = <1>;
+                bias-disable;
+            };
+            fusion_audio_dout: fusion-hat-audio-dout {
+                pins = "PB7";
+                function = "i2s0_dout0";
+                allwinner,drive = <1>;
+                bias-pull-down;
+            };
+            fusion_audio_din: fusion-hat-audio-din {
+                pins = "PB8";
+                function = "i2s0_din0";
+                allwinner,drive = <1>;
+                bias-pull-down;
+            };
+            fusion_audio_sleep: fusion-hat-audio-sleep {
+                pins = "PB5", "PB6", "PB7", "PB8";
+                function = "io_disabled";
+                allwinner,drive = <1>;
+                bias-disable;
+            };
+        };
+    };
+
+    /* Disable the old association; overlay property deletion would not remove
+     * its inherited AC101 routes/codec reference from the base DTB.
+     */
+    fragment@1 {
+        target = <&i2s0_mach>;
+        __overlay__ { status = "disabled"; };
+    };
+
+    fragment@2 {
+        target = <&i2s0_plat>;
+        __overlay__ {
+            status = "okay";
+            tx-pin = <0>;
+            rx-pin = <0>;
+            clk-mode = <0>;
+            pinctrl-used;
+            pinctrl-names = "default", "sleep";
+            pinctrl-0 = <&fusion_audio_bclk &fusion_audio_lrck
+                         &fusion_audio_dout &fusion_audio_din>;
+            pinctrl-1 = <&fusion_audio_sleep>;
+        };
+    };
+
+    fragment@3 {
+        target-path = "/";
+        __overlay__ {
+            fusion-hat-audio {
+                compatible = "allwinner,sunxi-snd-mach";
+                soundcard-mach,name = "fusionhat-audio";
+                soundcard-mach,format = "i2s";
+                soundcard-mach,frame-master = <&fusion_audio_cpu>;
+                soundcard-mach,bitclock-master = <&fusion_audio_cpu>;
+                soundcard-mach,slot-num = <2>;
+                soundcard-mach,slot-width = <32>;
+                status = "okay";
+                fusion_audio_cpu: soundcard-mach,cpu {
+                    sound-dai = <&i2s0_plat>;
+                    soundcard-mach,pll-fs = <1>;
+                    soundcard-mach,mclk-fs = <0>;
+                };
+                /* Use the vendor's existing snd-soc-dummy transport endpoint.
+                 * It is not a model/identification of the physical HAT codecs.
+                 */
+                soundcard-mach,codec { };
+            };
+        };
+    };
+};

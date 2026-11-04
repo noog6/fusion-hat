@@ -1,244 +1,324 @@
-# Orange Pi Zero 3W / Armbian: audio design investigation
+# Experimental Orange Pi Zero 3W / Armbian audio
 
-**Status: Stage 1 blocked; no audio installer or overlay is supplied.**
-This report starts at `v1` commit `eab29290b2e1895446b3461198657baed87f6920`,
-which merged PR #3. It targets only Orange Pi Zero 3W / Allwinner A733,
-aarch64, Armbian 26.8.3 / Ubuntu resolute, kernel
-`6.6.98-vendor-sun60iw2`, with a directly mounted Fusion HAT+.
-Read the [core installation guide](orange-pi-zero3w-install.md) first.
+This explicitly opt-in audio experiment builds on merged PR #3 at `v1` commit
+`eab2929`. Target only: Orange Pi Zero 3W / A733, aarch64, Armbian 26.8.3 /
+Ubuntu resolute, kernel `6.6.98-vendor-sun60iw2`, directly mounted Fusion HAT+.
+Read the [core guide](orange-pi-zero3w-install.md) first. Orange Pi audio remains
+pending operator validation. Missing chip part numbers do **not** block this
+bounded experiment: the working Pi implementation and live reference data
+establish one operating profile, without identifying the chips.
 
-The operator has verified persistent MCU binding, non-root Python readouts,
-USR events and bounded P0 servo movement. Those results do not validate audio.
-Keep `i2c0`, `fusion-hat-core`, `disable_auto_shutdown=Y` and
-`restrict_controls=Y` intact. Leave the speaker disabled during investigation.
-This change provides read-only inspection commands and the evidence needed to
-finish the design; it does not change boot configuration, permissions, ALSA
-defaults, the MCU installer, or the Raspberry Pi path.
+## Evidence and selected profile
 
-## Header routing and the documentation conflict
+The operator's Raspberry Pi Zero 2 W reference runs Raspberry Pi OS, kernel
+`6.18.50+rpt-rpi-v8`, with `dtoverlay=sunfounder-fusionhat`. Loaded modules include
+Google Voice HAT codec, RPi simple soundcard and BCM2835 I2S. Both ALSA directions
+enumerate on `sndrpigooglevoi`, device 0. Initial `hw_params` files were closed;
+that alone established no active stream configuration.
 
-Orange Pi's own [wiringOP header table][opi-header] names the physical pins.
-Its [Zero 3W device tree][opi-pins] supplies the I2S0 alternate functions.
-SunFounder's [dedicated audio table][hat-audio] and [DIP-switch drawing][hat-switch]
-identify SCLK/18, WS/19, AI/20 and AO/21. Combining these primary sources gives:
+The operator then captured directly from `hw:CARD=sndrpigooglevoi,DEV=0`, with
+the speaker off. ALSA reported exact rate 48000, S32_LE, two channels, msbits 32.
+The WAV contains 240000 frames, 4-byte samples, 2 channels and 48000 Hz: five
+seconds. Reported normalized channel levels were:
 
-| Physical header pin | A733 pin/function | HAT connection | Direction relative to the host |
-| --- | --- | --- | --- |
-| 12 | PB5 / `i2s0_bclk` | SCLK, Raspberry Pi GPIO18 | Clock output, if the host is clock provider |
-| 35 | PB6 / `i2s0_lrck` | WS, Raspberry Pi GPIO19 | Clock output, if the host is clock provider |
-| 38 | PB8 / `i2s0_din0` | AI / microphone, Raspberry Pi GPIO20 | Input |
-| 40 | PB7 / `i2s0_dout0` | AO / speaker, Raspberry Pi GPIO21 | Output |
-| 7 | PB4 / `i2s0_mclk` or `pwm0_0` | HAT digital GPIO4 | No audio assignment established |
+| Capture channel | Peak | RMS |
+| --- | --- | --- |
+| 0 | 0.3223552704 | 0.0051210992 |
+| 1 | 0.3142986298 | 0.0137149733 |
 
-Pin 7 is labelled PWM0-0 in wiringOP; the device tree maps that function to
-PB4. This is not permission to claim it for audio. No HAT MCLK connection or
-requirement was established. Exclude PB4 from both active and sleep audio
-pinctrl unless circuit evidence proves it is needed and available.
+This establishes actual nonzero capture data. Intelligibility, physical clock
+measurements and true microphone precision have not been reported. Keep both
+channels; levels do not identify a chip or prove which channel should be used.
 
-SunFounder's [general pin table][hat-conflict] instead labels GPIO20 as
-speaker enable. That conflicts with its dedicated audio table and AI/20 switch
-label. Treat pin 38 as the microphone-data candidate, **never as an output
-enable GPIO**. The drawing and audio table support that interpretation, but
-the exact board revision's schematic/electrical routing remains unverified.
-Do not move the audio DIP switches while audio is active.
+The fork's [Pi overlay](sunfounder-fusionhat-overlay.dts) connects that software
+implementation. In the inspected Raspberry Pi 6.18 source family at revision
+`a4985478de14b3a83c8e04fed68377c1bdae735d`:
 
-The Orange Pi schematic folder is publicly linked at
-[the vendor download location][opi-schematic]. The folder was reachable, but
-the schematic PDF itself could not be retrieved in this investigation; the
-official board page/wiki also failed to load. The table above is corroborated
-by vendor source, not a claim that the schematic or physical wiring was tested.
-The SoC pin names alone would not establish physical header positions.
+- [The codec driver][pi-codec] restricts both directions to 48000 / S32_LE /
+  two channels. Chip-related names inside that driver do not identify this HAT.
+- [The machine driver][pi-machine] selects I2S, normal bit/frame polarity and
+  CPU-provided clocks, with BCLK ratio sample width x 2.
+- The existing [`fusion_hat/device.py`](../fusion_hat/device.py) clock check also
+  generates 48000 / 32-bit / stereo playback for the Fusion Pi path.
 
-## HAT components and speaker control
+That inspected revision is 6.18.60, not the reference binary's exact revision;
+the live reference capture independently confirms the selected PCM profile.
 
-The inspected SunFounder documentation/repository identifies an I2S speaker
-path and a MEMS microphone but supplies no verified amplifier/microphone part
-numbers or board schematic/BOM. The operator also has no schematic/BOM.
-There is consequently no source-confirmed basis here for identifying the
-devices as MAX98357A, ICS43432, INMP441, or the Google Voice HAT hardware.
-Overlay names are software configurations, not component identification.
-
-Still needed from SunFounder or revision-specific circuit/component evidence:
-
-- Actual amplifier and microphone part numbers and HAT revision.
-- I2S versus other serial format, sample precision, supported rates, BCLK/LRCLK
-  polarity and ratio, and whether either component requires MCLK.
-- Microphone left/right slot selection, inactive-slot behaviour, and how its
-  data reaches pin 38 through the DIP switch.
-- Amplifier channel selection and the electrical enable/power path controlled
-  by the MCU, including any required clock/enable sequencing.
-
-The existing [driver speaker interface][speaker] accepts only 0/1 and sends
-MCU command `0x31`; it updates a software cache after a successful SMBus write.
-`speaker_show()` returns that cache, not an amplifier measurement. Probe writes
-0, and `restrict_controls=Y` makes the attribute root-writable. This is separate
-from ALSA registration and audio samples; setting it to 1 cannot create a
-sound card. The MCU command establishes the software control mechanism, not
-the unprovided amplifier circuit or its timing requirements. Use the driver's
-interface for later deliberate speaker control, without raw I2C access or an
-invented host GPIO mapping.
-
-## Vendor-kernel design findings
-
-The [Armbian family configuration at the reported build revision][armbian-source]
-selects `orangepi-xunlong/linux-orangepi`, branch
-`orange-pi-6.6-sun60iw2`. Inspected source revision:
-`2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f`. This identifies the appropriate
-vendor source family; it does **not** prove the installed binary was built
-from that exact commit. Preserve package/build provenance before implementation.
-
-| Source at that revision | Finding and consequence |
+| Property | Selected configuration |
 | --- | --- |
-| [`arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-zero3w.dts`][opi-machine] | `i2s0_mach` is enabled and associated with AC101; `i2s0_plat` is disabled. The CPU/codec children and AC101 routes are explicit. Do not create a second machine competing for I2S0 or enable the unrelated AC101. |
-| [`arch/arm64/boot/dts/allwinner/sun60iw2p1.dtsi`][soc-i2s] | I2S0 has TX and RX DMA and labelled platform/machine nodes. A future overlay must use verified symbols/paths, not copied numeric phandles. |
-| [`bsp/drivers/sound/platform/snd_sunxi_mach.c`][mach-parse] | Uses `soundcard-mach,*` properties, parses CPU before codec, and preserves `-EPROBE_DEFER`. Its `simple_dai_link_of failed` message does not identify one unique cause. |
-| [Same machine driver, clock setup][mach-clock] | Programs PLL, BCLK ratio, serial format and TDM slots from the vendor properties. This is not the mainline `simple-audio-card` binding. |
-| [`bsp/drivers/sound/platform/snd_sunxi_mach_utils.c`][mach-utils] | Parses slot count/width, CPU MCLK settings and named component endpoints. The driver source and matching DTS are the inspected vendor binding contract; no corresponding vendor schema was located in the searched binding directories. |
-| [`bsp/drivers/sound/platform/snd_sunxi_i2s.c`][i2s-dai] | Advertises both playback and capture, multiple sample formats and up to 16 channels. Those transport capabilities are not HAT capabilities. |
-| [Same I2S driver, MCLK handling][i2s-mclk] | A zero requested MCLK disables MCLK output. Whether that is correct for this HAT still depends on its components. |
-| [`sound/soc/soc-utils.c`][dummy] | ASoC's dummy endpoint advertises broad playback/capture capabilities without modelling the physical devices' constraints. |
+| PCM | 48000 Hz, S32_LE, two interleaved channels; 32-bit container, not an ADC precision claim |
+| Serial format | I2S, normal bit/frame polarity, one-bit I2S offset |
+| Clock provider | Host for BCLK and LRCLK |
+| Serial frame | Two 32-bit slots, 64 BCLKs per frame |
+| Expected clocks | LRCLK 48 kHz, BCLK 3.072 MHz: derived settings, not measured waveforms |
+| External MCLK | Not routed; Pi audio uses four serial signals, PB4 is excluded |
+| Playback | Identical, low-amplitude samples in both slots |
+| Capture | Both slots, unchanged |
+| Speaker | Existing MCU sysfs switch, command `0x31`; no new host GPIO mapping |
 
-The machine driver can fall back to `snd-soc-dummy` when no usable codec
-reference/name is provided. A resulting ALSA card would demonstrate software
-registration only. It would not establish correct channel mapping, timing,
-microphone data or intelligible capture. This report supplies no dummy-codec
-overlay as a substitute for those missing facts.
+## Routing and remaining unknowns
 
-The operator reports SUNXI PCM/MACH/COMMON/I2S/COMPONENTS and AC101 built in,
-while SIMPLE_CARD, MAX98357A, ICS43432 and DMIC drivers are disabled. Therefore:
+Orange Pi's [vendor wiring table][opi-header] gives physical header positions;
+its [Zero 3W pinctrl][opi-pins] gives the alternate functions. SunFounder's
+[audio table][hat-audio] and [DIP drawing][hat-switch] identify SCLK/18, WS/19,
+AI/20 and AO/21:
 
-- A generic `simple-audio-card` overlay is not supported by the reported config.
-- Disabled mainline codec options alone do not prove a kernel rebuild is needed:
-  the vendor machine/I2S transport already exists. Conversely, transport and a
-  dummy endpoint do not prove device-tree changes alone are sufficient.
-- An I2S microphone is distinct from a PDM microphone using the SUNXI DMIC
-  controller. Do not enable/reroute DMIC based on the word "digital".
-- The current 4 slots x 16 bits is inherited AC101 configuration. Even when its
-  total BCLK count equals 2 x 32, sample placement/channel mapping can differ.
-  Neither configuration is established for the HAT by the current evidence.
+| Physical pin | A733 pin/function | HAT signal | Host direction |
+| --- | --- | --- | --- |
+| 12 | PB5 / `i2s0_bclk` | SCLK | Output |
+| 35 | PB6 / `i2s0_lrck` | WS | Output |
+| 38 | PB8 / `i2s0_din0` | AI / microphone | Input |
+| 40 | PB7 / `i2s0_dout0` | AO / speaker | Output |
+| 7 | PB4 / `i2s0_mclk` or `pwm0_0` | HAT digital GPIO4 | Untouched |
 
-The operator's live-tree/log/deferred-device observations agree with incomplete
-AC101 configuration. They do not prove that association is the sole cause of
-every parsing error. Armbian has a [similar AC101-disable patch for the 4 Pro][ac101-patch];
-it changes a different board and is not an audio solution for the Zero 3W.
+The [general HAT table][hat-conflict] instead calls GPIO20 speaker enable.
+The dedicated audio table, AI/20 drawing and working reference capture support
+using pin 38 as input. Never use it as an output-enable GPIO. No chip identity
+follows from these facts. The [vendor schematic folder][opi-schematic] was
+reachable but its PDF could not be retrieved; no schematic inspection is claimed.
 
-## Read-only operator inspection
+The corrected operator check used `find` under sudo. PB4..PB8 all reported
+**UNCLAIMED** on the Orange Pi. The earlier non-root wildcard expansion error
+was not evidence that pinctrl support was missing. Registered DAIs were
+`sunxi-snd-plat-i2s`, `sunxi-snd-codec-hdmi`, `snd-soc-dummy-dai`.
 
-Run on the stated target with actuators disconnected. These commands do not
-load/unbind devices, change pinmux, enable the speaker, start streams, install
-packages or edit boot configuration. Capture failures as evidence too.
+| Remaining question | Effect on the bounded experiment |
+| --- | --- |
+| Actual installed DTB symbols, enabled overlays and conflicts | Must pass board-side offline `check` before installation |
+| Live PB5..PB8 ownership | Must be free at first install; reported free and rechecked |
+| Audio DIP routing / speaker connection | Operator verifies while audio is inactive; switch position cannot be established in software |
+| Chip identities, full rate range, true ADC precision | Not prerequisites for this one reproduced profile |
+| Capture slot/downmix choice or amplifier channel selection | Retain both capture slots and duplicate playback samples |
+| Actual Orange Pi clocks, audible playback and intelligible capture | Experimental outcomes, not already established facts |
+| Pi GPIO16 SDMODE dependency on this HAT revision | Not transplanted; test existing MCU control with clocks running, stop on failure |
+
+The Pi codec delays GPIO16 amplifier enable by 5 ms. That does not establish a
+need to claim Orange Pi physical pin 36. Here playback starts muted, waits for
+PCM RUNNING plus 50 ms, then enables the existing MCU switch. Normal completion
+mutes during trailing silence before PCM closure. This is a bounded sequencing
+choice to validate, not a datasheet guarantee. Do not increase amplitude or add
+other pins/clocks to work around an initial failure.
+
+## Implementation and ownership
+
+The [Armbian family at the reported build revision][armbian-source] selects
+Orange Pi's `orange-pi-6.6-sun60iw2` kernel source. Inspected vendor revision:
+`2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f`; exact installed-binary commit
+provenance remains unconfirmed. Relevant source paths are:
+
+- [Zero 3W DTS][opi-machine]: old AC101 machine enabled, I2S0 platform disabled,
+  header pinctrl groups.
+- [SoC DTSI][soc-i2s]: labelled platform/machine nodes and TX/RX DMA.
+- [SUNXI machine parser][mach-parse] and [utilities][mach-utils]: vendor
+  `soundcard-mach,*` properties, clock/slot setup and dummy endpoint fallback.
+- [SUNXI I2S driver][i2s-dai]: playback/capture support and [zero-MCLK handling][i2s-mclk].
+
+The new overlay disables `i2s0_mach`, enables I2S0 with PB5..PB8 only, and adds
+one clean root machine `/fusion-hat-audio` using the existing dummy transport
+endpoint. It is not a model/identification of physical codecs. A fresh machine
+avoids inherited AC101 references/routes: overlay `/delete-property/` would not
+remove those base-tree properties. No competing sound card uses I2S0.
+
+Mainline SIMPLE_CARD/MAX98357A/ICS43432/DMIC options are not needed for this
+transport experiment. No kernel module/rebuild is introduced. The dummy
+endpoint advertises broad PCM capabilities; **only 48000 / S32_LE / stereo is
+covered here**, fixed by the explicit test helper. Card appearance alone is not
+hardware success. I2S is not the separate SUNXI PDM/DMIC path.
+
+The installer compiles/applies all enabled vendor/user overlays offline in a
+temporary directory. A property comparison rejects changes outside the audio
+platform, old machine status and new audio nodes/symbols. MCU, HDMI, PB4 and
+unrelated DT state must remain unchanged. It refuses busy/unknown pins, an
+unowned enabled controller or audio nodes, competing I2S0 references, missing
+tools/symbols/DAIs, unsuitable MCU policy and edited/unowned managed files.
+
+It owns only the audio DTBO, one udev rule, one speaker-permission helper, its
+boot token, dedicated `fusionhat-audio` group/membership and manifest/recovery
+snapshots under `/var/lib/fusion-hat-audio`. Files/rules precede boot activation;
+the audio token is added last. Identical reinstall is a no-op; changed inputs
+require removal and reboot first. Rollback/removal preserves unrelated changes,
+`i2c0`/`fusion-hat-core`, both MCU flags, core files and HDMI configuration.
+
+It never installs packages, upgrades the kernel, runs Pi repair/audio setup,
+changes global ALSA defaults, loads/unbinds modules, applies live overlays,
+starts streams or reboots. Existing built-in SUNXI drivers need no new initramfs
+content. Remove experimental audio before changing kernel/image; compatibility
+with an updated kernel is not promised.
+
+Udev grants only PCM0 playback/capture and card control below the new machine,
+plus the speaker switch after verifying the MCU binding, both flags and active
+audio DT node. Rules cover coldplug/recreation, without blanket audio/input/I2C
+access. P0 and other controls retain their existing grants. ALSA card indices
+may change; the helper discovers the DT-owned card and selects its explicit ID.
+HDMI configuration is preserved, not its numeric enumeration order.
+
+## 1. Prerequisites and offline check
+
+Stop audio users and disconnect actuators. Verify the HAT's four audio DIP
+connections while inactive; remove power before changing switches/wiring.
+Keep the speaker off. From the reviewed checkout on the Orange Pi:
 
 ```bash
+git switch experiment/orange-pi-zero3w-audio
+git pull --ff-only
 uname -m
 uname -r
-cat /proc/version
-dpkg-query -W -f='${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n' 'linux-image*sun60iw2*'
 cat /boot/armbianEnv.txt
 cat /sys/module/fusion_hat/parameters/{disable_auto_shutdown,restrict_controls}
 readlink -f /sys/bus/i2c/devices/0-0017/driver
 cat /sys/class/fusion_hat/fusion_hat/speaker
-command -v dtc fdtget fdtoverlay aplay arecord amixer
+command -v dtc fdtoverlay aplay arecord udevadm
+sudo find /sys/kernel/debug/pinctrl -maxdepth 2 -type f \
+  -name pinmux-pins -exec grep -HE 'PB[4-8]([^0-9]|$)' {} +
+sudo cat /sys/kernel/debug/asoc/dais
+runtime_user=$(id -un)
+sudo ./driver/orange-pi-zero3w-audio-install.py check --runtime-user "$runtime_user"
+```
+
+Require the target kernel, both flags `Y`, existing Fusion binding, speaker
+cache `0`, free PB5..PB8 and successful offline composition. Debugfs must
+already expose ownership/DAI data; absent data is not assumed safe. Resolve
+failed prerequisites explicitly. No kernel headers or Python packages are
+installed or needed for this overlay-only step.
+
+## 2. Install, review, reboot explicitly
+
+Only after `check` succeeds:
+
+```bash
+sudo ./driver/orange-pi-zero3w-audio-install.py install --runtime-user "$runtime_user"
+cat /boot/armbianEnv.txt
+```
+
+Review the token/output, then reboot through the normal operator procedure and
+log in again for group membership. No script reboots or tests audio automatically.
+
+## 3. Enumeration and non-root access
+
+```bash
+id -nG
+cat /sys/module/fusion_hat/parameters/{disable_auto_shutdown,restrict_controls}
+readlink -f /sys/bus/i2c/devices/0-0017/driver
+cat /sys/class/fusion_hat/fusion_hat/firmware_version
 aplay -l
 arecord -l
-id -nG
-ls -l /dev/snd
-```
-
-Require both MCU flags `Y` and the existing Fusion binding. The reported
-speaker cache value is `0`. Missing ALSA tools are a prerequisite to resolve
-explicitly; do not run the Raspberry Pi audio setup to obtain them.
-
-```bash
-dtb=/boot/dtb/allwinner/sun60i-a733-orangepi-zero3w.dtb
-sha256sum "$dtb"
-for symbol in i2s0_plat i2s0_mach i2s0_cpu i2s0_codec i2s0_pins_a i2s0_pins_b i2s0_pins_c i2s0_pins_d i2s0_pins_e; do
-  printf '%s: ' "$symbol"
-  fdtget -t s "$dtb" /__symbols__ "$symbol"
+stat -Lc '%a %U %G %n' /sys/class/fusion_hat/fusion_hat/speaker
+for card in /sys/class/sound/card[0-9]*; do
+  if [ "$(readlink -f "$card/device/of_node")" = /sys/firmware/devicetree/base/fusion-hat-audio ]; then
+    cat "$card/id"
+    number=${card##*card}
+    stat -c '%a %U %G %n' "/dev/snd/controlC$number" "/dev/snd/pcmC${number}D0p" "/dev/snd/pcmC${number}D0c"
+  fi
 done
-headers=$(readlink -f "/lib/modules/$(uname -r)/build")
-grep -E '^(CONFIG_SND_SOC_SUNXI_(PCM|MACH|COMMON|I2S|COMPONENTS)|CONFIG_SND_SIMPLE_CARD|CONFIG_SND_SOC_(AC101|MAX98357A|ICS43432|DMIC|SUNXI_DMIC))=' \
-  "$headers/include/config/auto.conf"
+venv_python="${VIRTUAL_ENV:?Activate the intended venv}/bin/python"
+"$venv_python" examples/orange_pi_zero3w_audio.py check
 ```
 
-A missing configuration line does not itself establish the running binary's
-configuration; compare the matching `/boot/config-$(uname -r)` if available.
-Missing symbols require inspecting the actual DTB rather than substituting
-live numeric phandles. Retain that DTB and the enabled vendor/user overlays for
-offline composition tests once a design is supported.
-
-Read pin ownership and ASoC registration if debugfs is already available:
+Expect one new card with both directions, HDMI still available, MCU binding and
+flags intact, and named PCM/control nodes and speaker `660 root fusionhat-audio`.
+The vendor may call the card `sndi2s0`; selection uses actual DT ancestry/ID.
+The helper rejects other cards and requires non-root access. Its `check` action
+opens no PCM and enables no speaker. Python uses only the standard library;
+no pip, audio server, voice packages or default-device replacement is needed.
+For failures preserve the output and relevant logs:
 
 ```bash
-sudo grep -E 'PB[4-8]([^0-9]|$)' /sys/kernel/debug/pinctrl/*/pinmux-pins
-sudo cat /sys/kernel/debug/asoc/dais
-sudo cat /sys/kernel/debug/devices_deferred
-sudo dmesg | grep -Ei 'asoc|snd|i2s|dai|ac101|defer'
+sudo dmesg | grep -Ei 'asoc|snd|i2s|dai|ac101|fusion|defer'
 ```
 
-Do not mount debugfs or change permissions automatically. If these files are
-absent/unreadable, ownership remains unknown; no output is not proof that pins
-are free. Check enabled overlays, GPIO consumers, PWM/UART/TWI alternatives
-and live ownership. MCU TWI0 uses PB2/PB3, but that does not exclude other users
-of PB4..PB8. The vendor DTS contains alternative PWM functions on PB6/PB7 and
-TWI on PB7/PB8; inactive pinctrl definitions are not themselves active owners.
+## 4. Capture first, speaker off
 
-## Implementation gate and subsequent operator handoff
+Speak a short phrase during the five-second capture:
 
-The smallest next step is to obtain revision-specific HAT circuit/component
-evidence and datasheets, plus the read-only target provenance/pin-ownership
-output above. Confirm the audio DIP routing and current installed DTB. No
-kernel rebuild has been shown necessary; no compatible installable audio design
-has yet been established. An executable overlay with guessed parts/timing would
-skip the requested first stage.
+```bash
+recording=$(mktemp -d)
+printf 'Recording directory: %s\n' "$recording"
+"$venv_python" examples/orange_pi_zero3w_audio.py capture --output "$recording/microphone.wav"
+```
 
-Once that evidence is available, the next change must:
+The fixed command is `arecord -D <discovered-hw-PCM> -t wav -f S32_LE -r 48000
+-c 2 -d 5`. No plug resampling/downmix hides mismatches. The helper creates the
+file exclusively, preserves raw stereo samples, requires five seconds and
+reports channel peak/RMS. Negotiation errors or zero/missing data need inspection;
+nonzero data alone is not intelligibility. Partial recordings are retained.
 
-1. Select a supported clock/slot/sample/channel configuration and model both
-   physical endpoints' constraints. Decide whether the existing transport is
-   sufficient or an additional small codec/component driver is required.
-   Stop for explicit review if a kernel rebuild is required.
-2. Supply a separate opt-in audio overlay and owned check/install/remove
-   transaction. Disable or replace the AC101 machine association without two
-   users of I2S0; preserve HDMI, MCU policy, unrelated overlays and permissions.
-   Compile/apply against the retained target DTB and existing overlays offline.
-3. Validate conflicts, missing dependencies/symbols, repeated installation,
-   boot-token preservation and rollback ownership with focused tests. Install
-   only reviewed local artifacts, activate the boot token last, never activate
-   devices or reboot automatically. Removal/recovery removes only audio-owned
-   files/token and retains `i2c0`/`fusion-hat-core` and both MCU policy flags.
-4. After explicit reboot, enumerate `aplay -l` and `arecord -l`, select the
-   verified HAT card ID/device explicitly, and verify both streams and non-root
-   permissions. Grant only that card's required ALSA nodes and the Fusion
-   speaker attribute if additional permissions are needed; no blanket group
-   expansion or global ALSA default replacement.
-5. Provide a short digitally attenuated test sound, deliberately enable the
-   speaker through its existing sysfs interface, play as the runtime user and
-   disable the speaker on completion/error/interrupt. Record a short spoken
-   phrase with the documented supported rate/format/channels and explicit HAT
-   capture device. Verify intelligibility and audible playback separately.
-   Exact stream commands await those supported parameters; arbitrary 48 kHz,
-   S16_LE, mono defaults are not established by an ALSA card listing.
-6. Recheck persistence, cleanup and MCU operation. Record actual audible
-   playback and intelligible capture only after operator results arrive.
+## 5. Short low-volume playback, then recording review
 
-`fusion_hat/scripts/setup_fusion_hat_audio.sh` was inspected, not run. Its
-explicit card selection and separate speaker control are useful concepts, but
-it loads the Pi `googlevoicehat-soundcard` overlay, installs PulseAudio, replaces
-`/etc/asound.conf` defaults, changes mixer controls and starts audio tests.
-Even `--skip-test` does not make it a read-only prerequisite check. None of
-those assumptions/actions belongs in this stage. No STT/TTS, wake-word,
-voice-assistant, runtime, servo, shutdown or general host-GPIO work is included.
+The explicit tone uses 440 Hz, 1% digital peak (-40 dBFS), identical slots,
+300 ms silent pre-roll and a trailing mute window:
+
+```bash
+"$venv_python" examples/orange_pi_zero3w_audio.py playback
+cat /sys/class/fusion_hat/fusion_hat/speaker
+"$venv_python" examples/orange_pi_zero3w_audio.py replay --input "$recording/microphone.wav"
+cat /sys/class/fusion_hat/fusion_hat/speaker
+```
+
+The helper requires PCM RUNNING with `owner_pid` equal to its own `aplay` child,
+waits another 50 ms, enables the existing speaker
+switch, then attempts mute before normal PCM closure. Replay bounds peak to
+1% and retains both slots. Expect an audible short tone, intelligible speech on
+replay, and speaker readback `0` after each action. Do not raise amplitude to
+bypass a failed initial result. The retained WAV can also be heard on a known
+working system to check intelligibility independently of Orange Pi playback.
+
+Normal completion, exceptions, Ctrl-C and SIGTERM attempt speaker-off and stop
+only the helper's child process. Child sessions prevent terminal Ctrl-C from
+stopping clocks before the parent attempts mute. Readback is cached driver
+state, not a physical measurement. SIGKILL, power loss, failed I2C writes and
+external processes can defeat cleanup; stop tests and remove speaker power if
+uncertain. Do not use raw I2C, global mixer repair or Pi setup.
+
+Report audible playback, intelligibility, both channel levels, errors and
+cleanup separately. A scope/analyzer can compare expected BCLK/LRCLK with the
+reference (3.072 MHz / 48 kHz); no waveform measurement is inferred from software.
+After another explicit reboot, repeat non-stream checks and a bounded test to
+verify audio persistence.
+
+## 6. Removal/recovery
+
+Stop audio users and deliberately leave the speaker off; remove audio only:
+
+```bash
+printf '0\n' | sudo tee /sys/class/fusion_hat/fusion_hat/speaker
+sudo ./driver/orange-pi-zero3w-audio-install.py uninstall
+cat /boot/armbianEnv.txt
+```
+
+Reboot explicitly. Uninstall removes no live device/module; existing sessions
+retain group access until logout/reboot. Only owned files/token and added group
+membership are removed; later unrelated group members are preserved. Edited
+files or changed group identity cause refusal before destructive cleanup.
+Snapshots remain at `/var/lib/fusion-hat-audio/armbianEnv.before.*`; never restore
+a whole snapshot over later unrelated edits.
+
+If boot fails, use the console or mount the boot filesystem elsewhere and remove
+only `fusion-hat-audio` from `overlays=`. Preserve `i2c0`, `fusion-hat-core` and
+both core policy flags. Boot with actuators disconnected, then uninstall audio.
+The old deferred AC101 warning may return with the original configuration;
+removal does not repair that separate pre-existing state.
 
 ## Validation limits
 
-Primary source files, vendor pin tables, HAT drawings/docs and installer logic
-were inspected in the cloud. No target DTB was available locally; overlay tools
-were absent there. No overlay was compiled or applied, no kernel/audio module
-was built, and no board-side inspection, installer, playback or capture was run
-in the cloud. The pre-existing operator audio observations are not new tests.
-This documentation change has no installation/rollback code to unit-test;
-its shell examples are syntax-checked without executing hardware commands.
-Playback, intelligible microphone capture and audio persistence remain pending.
+The overlay compiled with DTC 1.7.2 and applied to a small DT fixture and a
+Zero 3W DTB built from the inspected vendor source, alongside the MCU overlay.
+Protected-property comparisons passed. That source-built DTB is **not** the
+exact installed Armbian artifact; board-side `check` validates that artifact
+and its actual enabled overlays. No new kernel module is built here.
+
+Focused tests cover real composition, MCU/HDMI/PB4 preservation, conflicts,
+missing prerequisites, MCU policy gates, repeat installation, ownership,
+rollback, scoped grants, explicit card/profile selection and mocked stream
+cleanup including Ctrl-C. The existing suite is run too. Cloud Python is
+3.12/x86_64; target Python 3.14/audio remains pending. No hardware installer,
+PCM stream or speaker operation was run in the cloud.
+
+Reference capture and Orange Pi pin/DAI results above are operator-provided
+hardware evidence. Target audio binding/permissions, audible playback,
+intelligible capture, physical timing/cleanup and persistence remain pending.
+The Pi implementation/installer/overlay are unchanged; Raspberry Pi hardware
+regression testing was not performed. No STT/TTS, wake-word, runtime, servo,
+automatic shutdown or general-purpose host GPIO changes are included.
 
 [opi-header]: https://github.com/orangepi-xunlong/wiringOP/blob/a7921ca2f5c124203be10d3418db70a2e15f3c10/gpio/readall.c#L797
 [opi-pins]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-zero3w.dts#L910
@@ -248,12 +328,10 @@ Playback, intelligible microphone capture and audio persistence remain pending.
 [hat-switch]: https://github.com/sunfounder/fusion-hat/blob/4bd1018ad5a70ee113160536f969cdadd9f22918/docs/source/hardware/img/audio_fh_v0.png
 [hat-conflict]: https://github.com/sunfounder/fusion-hat/blob/4bd1018ad5a70ee113160536f969cdadd9f22918/docs/source/hardware/interfaces.rst#L186
 [opi-schematic]: https://drive.google.com/drive/folders/199S7SkbqVDjMpPT7tkcbBX6kmbfnz94r
-[speaker]: https://github.com/noog6/fusion-hat/blob/eab29290b2e1895446b3461198657baed87f6920/driver/speaker.c#L17
 [armbian-source]: https://github.com/armbian/build/blob/fd4ebfd1e/config/sources/families/sun60iw2.conf#L26
 [mach-parse]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/bsp/drivers/sound/platform/snd_sunxi_mach.c#L343
-[mach-clock]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/bsp/drivers/sound/platform/snd_sunxi_mach.c#L90
 [mach-utils]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/bsp/drivers/sound/platform/snd_sunxi_mach_utils.c#L450
 [i2s-dai]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/bsp/drivers/sound/platform/snd_sunxi_i2s.c#L1680
 [i2s-mclk]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/bsp/drivers/sound/platform/snd_sunxi_i2s.c#L825
-[dummy]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/sound/soc/soc-utils.c#L187
-[ac101-patch]: https://github.com/armbian/build/blob/fd4ebfd1e/patch/kernel/archive/sun60iw2-opi-vendor/0004-orangepi4pro-disable-unpopulated-ac101-audio.patch
+[pi-codec]: https://github.com/raspberrypi/linux/blob/a4985478de14b3a83c8e04fed68377c1bdae735d/sound/soc/bcm/googlevoicehat-codec.c#L137
+[pi-machine]: https://github.com/raspberrypi/linux/blob/a4985478de14b3a83c8e04fed68377c1bdae735d/sound/soc/bcm/rpi-simple-soundcard.c#L124
