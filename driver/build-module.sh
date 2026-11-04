@@ -4,8 +4,10 @@ set -euo pipefail
 
 fail() { echo "Build preflight: $*" >&2; exit 1; }
 
+check_only=false
+if [[ ${1:-} == --check-only ]]; then check_only=true; shift; fi
 if [[ $# != 2 ]]; then
-    echo "Usage: $0 KERNEL_RELEASE KERNEL_BUILD_DIR" >&2
+    echo "Usage: $0 [--check-only] KERNEL_RELEASE KERNEL_BUILD_DIR" >&2
     exit 2
 fi
 target_release=$1
@@ -44,6 +46,10 @@ for tool in make "${CC:-gcc}"; do
     command -v "$tool" >/dev/null || fail "Missing tool '$tool'. Provide the matching native kernel toolchain."
 done
 
+if $check_only; then
+    echo "Build preflight passed: release=$target_release headers=$kernel_build"
+    exit 0
+fi
 echo "Building only: release=$target_release architecture=$(uname -m) headers=$kernel_build"
 # The kernel's modules target consumes obj-m; it does not run driver/Makefile all.
 make -C "$kernel_build" M="$driver_dir" modules

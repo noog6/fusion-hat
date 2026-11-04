@@ -483,20 +483,19 @@ int fusion_hat_pwm_probe(struct fusion_hat_dev *dev) {
     pwm_channels[i].channel = i;
     pwm_channels[i].dev = dev;
 
-    // Initialize sysfs attributes with 0666 permissions (rw-rw-rw-)
-    // to allow access for all users without requiring sudo
+    // Preserve legacy permissions unless the restricted core policy is selected.
     pwm_channels[i].period_attr.attr.name = "period";
-    pwm_channels[i].period_attr.attr.mode = 0666;
+    pwm_channels[i].period_attr.attr.mode = fusion_hat_control_mode(fusion_hat_restrict_controls);
     pwm_channels[i].period_attr.show = period_show;
     pwm_channels[i].period_attr.store = period_store;
 
     pwm_channels[i].duty_cycle_attr.attr.name = "duty_cycle";
-    pwm_channels[i].duty_cycle_attr.attr.mode = 0666;
+    pwm_channels[i].duty_cycle_attr.attr.mode = fusion_hat_control_mode(fusion_hat_restrict_controls);
     pwm_channels[i].duty_cycle_attr.show = duty_cycle_show;
     pwm_channels[i].duty_cycle_attr.store = duty_cycle_store;
 
     pwm_channels[i].enable_attr.attr.name = "enable";
-    pwm_channels[i].enable_attr.attr.mode = 0666;
+    pwm_channels[i].enable_attr.attr.mode = fusion_hat_control_mode(fusion_hat_restrict_controls);
     pwm_channels[i].enable_attr.show = enable_show;
     pwm_channels[i].enable_attr.store = enable_store;
 

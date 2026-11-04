@@ -110,6 +110,7 @@ int fusion_hat_led_init(struct fusion_hat_dev *dev) {
     }
     
     /* Create sysfs attribute for LED control */
+    dev_attr_led.attr.mode = fusion_hat_control_mode(fusion_hat_restrict_controls);
     ret = device_create_file(dev->device, &dev_attr_led);
     if (ret < 0) {
         dev_err(&dev->client->dev, "Failed to create LED sysfs attribute: %d\n", ret);

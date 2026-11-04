@@ -22,6 +22,7 @@
 #include <linux/pwm.h>
 #include <linux/sysfs.h>
 #include <linux/workqueue.h>
+#include "core_policy.h"
 
 // Driver version
 #define VERSION "1.1.0"
@@ -150,6 +151,7 @@ struct fusion_hat_dev {
 // External variable declarations
 extern struct fusion_hat_dev *fusion_dev;
 extern struct workqueue_struct *main_wq;
+extern bool fusion_hat_restrict_controls;
 
 // Function declarations
 // PWM
@@ -191,6 +193,7 @@ ssize_t button_show(struct device *dev, struct device_attribute *attr,
                     char *buf);
 
 // Shutdown control
+bool fusion_hat_auto_shutdown_disabled(void);
 int fusion_hat_check_hardware_shutdown_request(struct fusion_hat_dev *dev);
 void fusion_hat_execute_shutdown(struct fusion_hat_dev *dev, int request_type);
 void fusion_hat_shutdown_request_work(struct fusion_hat_dev *dev);

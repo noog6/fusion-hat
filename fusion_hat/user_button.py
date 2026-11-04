@@ -1,6 +1,7 @@
 import time
 import threading
 import warnings
+import select
 from typing import Callable, Optional
 import evdev
 from evdev import InputDevice, ecodes
@@ -18,6 +19,9 @@ class UserButton:
         self.pressed_at = time.time()
         self._device: Optional[InputDevice] = None
         self._device_path: Optional[str] = None
+        self._is_task_running = False
+        self._stop_requested = False
+        self._listener_thread = None
 
         self.__on_click__ = None
         self.__on_press__ = None
@@ -84,12 +88,17 @@ class UserButton:
         """ Find the Fusion HAT USR button device """
         try:
             # 查找名称包含"Fusion HAT USR"的输入设备
-            devices = [InputDevice(path) for path in evdev.list_devices()]
-            for device in devices:
+            for path in evdev.list_devices():
+                try:
+                    device = InputDevice(path)
+                except OSError:
+                    # Scoped permissions may deny unrelated event devices.
+                    continue
                 if "Fusion HAT USR" in device.name:
                     self._device = device
                     self._device_path = device.path
                     break
+                device.close()
         except Exception:
             # 如果找不到设备，后续通过get_state时会尝试再次查找
             pass
@@ -100,6 +109,8 @@ class UserButton:
         Returns:
             bool: True if pressed, False if released
         """
+        if self._stop_requested:
+            return False
         # 如果设备未找到，尝试再次查找
         if not self._device and not self._device_path:
             self._find_button_device()
@@ -156,15 +167,22 @@ class UserButton:
 
     def _setup_event_listener(self) -> None:
         """ 设置事件监听器，在独立线程中处理输入事件 """
+        def input_events():
+            while not self._stop_requested:
+                if select.select([self._device], [], [], 0.1)[0]:
+                    yield from self._device.read()
+
         def event_handler():
-            while True:
+            while not self._stop_requested:
                 try:
                     # 确保设备已打开
                     if not self._device and self._device_path:
                         self._device = InputDevice(self._device_path)
                     
                     # 读取输入事件 - 这是一个阻塞调用，直到有事件发生
-                    for event in self._device.read_loop():
+                    for event in input_events():
+                        if self._stop_requested:
+                            break
                         # 处理按键事件
                         if event.type == ecodes.EV_KEY and event.code == ecodes.BTN_0:
                             pressed = event.value == 1
@@ -215,11 +233,16 @@ class UserButton:
                         except Exception:
                             pass
                         self._device = None
+                    if self._stop_requested:
+                        break
                     # 短暂等待后重试
                     time.sleep(0.1)
+            self._is_task_running = False
         
         # 在守护线程中启动事件处理器
         listener_thread = threading.Thread(target=event_handler, daemon=True)
+        self._is_task_running = True
+        self._listener_thread = listener_thread
         listener_thread.start()
 
     def start(self) -> None:
@@ -235,6 +258,8 @@ class UserButton:
 
     def stop(self) -> None:
         """ 关闭按钮设备连接 """
+        self._stop_requested = True
+        self._is_task_running = False
         # 关闭设备
         if self._device:
             try:
@@ -242,3 +267,5 @@ class UserButton:
             except Exception:
                 pass
             self._device = None
+        if self._listener_thread and self._listener_thread is not threading.current_thread():
+            self._listener_thread.join(timeout=0.5)

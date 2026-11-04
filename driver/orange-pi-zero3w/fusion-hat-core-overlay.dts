@@ -1,0 +1,21 @@
+/dts-v1/;
+/plugin/;
+
+/* Operator-verified vendor symbol: /soc@3000000/twi@2510000.
+ * i2c0 remains enabled separately for its header pinmux. No audio/SPI/GPIO.
+ */
+/ {
+    fragment@0 {
+        target = <&twi0>;
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            fusion_hat@17 {
+                compatible = "sunfounder,fusion_hat";
+                reg = <0x17>;
+                sunfounder,experimental-core;
+                status = "okay";
+            };
+        };
+    };
+};

@@ -20,6 +20,11 @@ MODULE_PARM_DESC(disable_auto_shutdown,
                 "Disable automatic host shutdown actions (default: false); "
                 "does not disable independent HAT firmware protections");
 
+bool fusion_hat_auto_shutdown_disabled(void)
+{
+    return disable_auto_shutdown;
+}
+
 /**
  * fusion_hat_check_hardware_shutdown_request - Check for hardware shutdown requests
  * @dev: Fusion HAT device structure

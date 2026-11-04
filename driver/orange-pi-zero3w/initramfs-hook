@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+case "${1:-}" in prereqs) exit 0 ;; esac
+. /usr/share/initramfs-tools/hook-functions
+manual_add_modules fusion_hat
+copy_file config /etc/modprobe.d/fusion-hat-core.conf
