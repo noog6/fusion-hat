@@ -30,6 +30,19 @@ This establishes actual nonzero capture data. Intelligibility, physical clock
 measurements and true microphone precision have not been reported. Keep both
 channels; levels do not identify a chip or prove which channel should be used.
 
+The operator also reports audible speaker playback on the reference Pi through
+its existing embodied-runtime application. A standalone command reproducing
+that result has not yet been supplied. Read-only inspection of the application's
+[WAV playback path][reference-playback] at commit
+`4216a0db49d24746583a8dffe5796a2e54bbce8f` shows MCU speaker enable **before**
+`aplay --quiet`, using the configured ALSA default. The experiment instead opens
+an explicit hardware PCM and enables the MCU speaker switch after RUNNING.
+The existing [Fusion Python functions](../fusion_hat/device.py) write the same
+speaker sysfs `1`/`0` values. Actual installed library behaviour and ALSA routing
+on the reference remain to be checked; the inspected application revision is
+not a claim about its deployed revision. This is a concrete sequencing/routing
+comparison, not proof of the cause of silence.
+
 The fork's [Pi overlay](sunfounder-fusionhat-overlay.dts) connects that software
 implementation. In the inspected Raspberry Pi 6.18 source family at revision
 `a4985478de14b3a83c8e04fed68377c1bdae735d`:
@@ -349,10 +362,12 @@ The operator subsequently installed from the checkout, rebooted and reported:
   `io_disabled`, owned by `2532000.i2s0_plat`. This matches the sleep-state
   selection described above; active-stream pin state remains to be checked.
 - The identical 1% tone was also reported silent through the existing
-  Raspberry Pi driver. This comparison has not established an audible
-  reference baseline. It does not identify the Orange Pi overlay or GPIO16
-  handling as the cause. Establish a known audible reference command and
-  inspect active-stream pin state before changing routing or amplitude.
+  Raspberry Pi driver, despite operator-confirmed audible playback through
+  the existing application. This comparison has not reproduced the working
+  application path. It does not identify the Orange Pi overlay or GPIO16
+  handling as the cause. Compare the application's speaker sequencing and
+  ALSA route, and inspect active-stream pin state, before changing routing or
+  amplitude.
 
 The startup `No 'sound-dai' property` message is consistent with the intentional
 dummy endpoint fallback. Missing clock-post-delay/default-format warnings and
@@ -393,3 +408,4 @@ automatic shutdown or general-purpose host GPIO changes are included.
 [pcm-open]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/sound/soc/soc-pcm.c#L798
 [pi-codec]: https://github.com/raspberrypi/linux/blob/a4985478de14b3a83c8e04fed68377c1bdae735d/sound/soc/bcm/googlevoicehat-codec.c#L137
 [pi-machine]: https://github.com/raspberrypi/linux/blob/a4985478de14b3a83c8e04fed68377c1bdae735d/sound/soc/bcm/rpi-simple-soundcard.c#L124
+[reference-playback]: https://github.com/noog6/embodied-runtime/blob/4216a0db49d24746583a8dffe5796a2e54bbce8f/embodied_runtime/voice.py#L679
