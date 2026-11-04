@@ -7,15 +7,21 @@ checkout; do **not** run `install.sh`, `make all`, `make install`, or `fusion_ha
 doctor --fix`. The existing Raspberry Pi installer and overlay are unchanged.
 
 The known hardware result is a user-reported firmware 1.0.2 read at address
-`0x17` on bus 0. Target compilation, module loading and driver readouts are still
-pending. No audio, host GPIO, actuator or runtime integration is included here.
+`0x17` on bus 0. A subsequent build on this target compiled all driver C files,
+but failed at MODPOST because IIO exports were absent. The installed header
+configuration has no `CONFIG_IIO`, and no `industrialio` module is available.
+The driver now omits the external ADC/IIO interface when IIO is not reachable;
+battery, firmware and USR-button interfaces are independent of it. With IIO built
+in or modular, the existing external ADC interface is retained. Rebuilding this
+fix, module loading and driver readouts remain pending. No audio, host GPIO,
+actuator or runtime integration is included here.
 
 ## 1. Prerequisites on the Orange Pi Zero 3W (read-only)
 
 Disconnect all motor/servo loads before loading **or removing** the driver. Stop
 other Fusion HAT users and do not run competing device/driver management during
-this session. Keep physical power access available: The board is powered through the
-HAT. Probe turns the LED and speaker off and starts battery/button work. PWM probe
+this session. Keep physical power access available: the board is powered through
+the HAT. Probe turns the LED and speaker off and starts battery/button work. PWM probe
 only initializes software state; it does not guarantee zero hardware outputs.
 Removal writes zero to all PWM channels and turns the LED off. Do not construct
 Python PWM/motor/servo objects: PWM construction enables a channel.
@@ -71,13 +77,17 @@ a target API difference, review that error before changing compatibility code.
 
 ## 3. Temporary load/bind in terminal A
 
-Load the standard IIO dependency if it is a module (leave shared dependencies
-loaded afterward); inspect the `depends` output for any others. A built-in IIO
-subsystem needs no separate load. If `insmod` reports unknown symbols, inspect
+Only load `industrialio` if the built module declares it in `depends` (leave
+shared dependencies loaded afterward); inspect that output for any others. With
+IIO disabled, the built driver has no IIO dependency and no external ADC sysfs
+interface. Its probe logs `IIO unavailable; external ADC interface disabled`.
+Built-in IIO needs no separate load. If `insmod` reports unknown symbols, inspect
 `sudo dmesg` and resolve the dependency/configuration rather than forcing a load.
 
 ```bash
-sudo modprobe industrialio
+if modinfo -F depends ./driver/fusion_hat.ko | tr ',' '\n' | grep -qx industrialio; then
+  sudo modprobe industrialio
+fi
 sudo ./driver/orange-pi-zero3w-session.sh "$PWD/driver/fusion_hat.ko"
 ```
 

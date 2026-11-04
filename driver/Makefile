@@ -6,8 +6,9 @@
 KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 
-# Extract version from main.h
-DRIVER_VERSION := $(shell grep '^\#define VERSION' main.h | awk '{print $$3}' | tr -d '"')
+# Kbuild includes this file from the kernel directory, not the driver directory.
+DRIVER_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+DRIVER_VERSION := $(shell grep '^\#define VERSION' "$(DRIVER_DIR)/main.h" | awk '{print $$3}' | tr -d '"')
 
 # Module definition - Combine all source files into a single module
 obj-m += fusion_hat.o
