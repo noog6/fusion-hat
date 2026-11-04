@@ -71,6 +71,12 @@ class BringupTests(unittest.TestCase):
         self.assert_failed(build(), "native architecture")
         arch = {"x86_64": "CONFIG_X86_64", "aarch64": "CONFIG_ARM64"}[os.uname().machine]
         config.write_text(f"{arch}=y\nCONFIG_MODULES=y\n")
+        check = subprocess.run(
+            ["bash", str(ROOT / "driver/build-module.sh"), "--check-only", "test-release", str(headers)],
+            env=env, text=True, capture_output=True,
+        )
+        self.assertEqual(check.returncode, 0, check.stderr)
+        self.assertFalse(self.log.exists(), "check-only must not invoke make")
         result = build()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.log.read_text().splitlines(), [

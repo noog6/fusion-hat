@@ -106,6 +106,7 @@ int fusion_hat_speaker_init(struct fusion_hat_dev *dev) {
     dev->speaker_status = 0;
     
     /* Create sysfs attribute for speaker control */
+    dev_attr_speaker.attr.mode = fusion_hat_control_mode(fusion_hat_restrict_controls);
     ret = device_create_file(dev->device, &dev_attr_speaker);
     if (ret < 0) {
         dev_err(&dev->client->dev, "Failed to create speaker sysfs attribute: %d\n", ret);

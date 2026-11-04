@@ -1,5 +1,8 @@
 # Fusion Hat driver
 
+For persistent experimental core setup and separate non-root Python/single-servo
+checks, see [Orange Pi Zero 3W / Armbian installation](orange-pi-zero3w-install.md).
+
 For the experimental Orange Pi Zero 3W / Armbian MCU readout milestone, use
 [the build-only and temporary-session procedure](orange-pi-zero3w-bringup.md). The install
 and actuator debug commands below are not that procedure.

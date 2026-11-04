@@ -1,0 +1,5 @@
+# Parent matches are split: the input name and I2C driver are on different ancestors.
+ACTION=="add|change", SUBSYSTEM=="input", KERNEL=="event*", KERNELS=="0-0017", DRIVERS=="fusion_hat", ENV{FUSION_HAT_CORE}="1"
+ACTION=="add|change", SUBSYSTEM=="input", KERNEL=="event*", ENV{FUSION_HAT_CORE}=="1", ATTRS{name}=="Fusion HAT USR Custom Button", GROUP="fusionhat-core", MODE="0660"
+# bind is after probe; root coldplug add/change also covers binding in initramfs.
+ACTION=="add|bind|change", SUBSYSTEM=="i2c", KERNEL=="0-0017", DRIVER=="fusion_hat", RUN+="/usr/libexec/fusion-hat-core-permissions"

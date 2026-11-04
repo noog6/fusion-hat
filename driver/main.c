@@ -34,6 +34,11 @@ static int i2c_bus = 1;  // Default to I2C bus 1
 module_param(i2c_bus, int, S_IRUGO);
 MODULE_PARM_DESC(i2c_bus, "I2C bus number to use (default: 1)");
 
+/* Opt-in permissions for the experimental persistent core installation. */
+bool fusion_hat_restrict_controls;
+module_param_named(restrict_controls, fusion_hat_restrict_controls, bool, 0444);
+MODULE_PARM_DESC(restrict_controls, "Create control attributes root-writable only (default: false)");
+
 // Global variable definitions (matching extern declarations in header file)
 struct fusion_hat_dev *fusion_dev;
 struct workqueue_struct *main_wq;
@@ -149,6 +154,15 @@ static struct device_type fusion_hat_device_type = {
  */
 static int fusion_hat_probe(struct i2c_client *client) {
     int ret;
+
+    /* Fail before any hardware access if early boot lost the required policy. */
+    if (!fusion_hat_core_policy_valid(
+            of_property_read_bool(client->dev.of_node, "sunfounder,experimental-core"),
+            fusion_hat_auto_shutdown_disabled(), fusion_hat_restrict_controls)) {
+        dev_err(&client->dev,
+                "Experimental core binding requires disable_auto_shutdown=1 restrict_controls=1\n");
+        return -EPERM;
+    }
     
     // Check if I2C adapter supports required functionality
     if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
