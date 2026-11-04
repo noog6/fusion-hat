@@ -159,6 +159,7 @@ connections while inactive; remove power before changing switches/wiring.
 Keep the speaker off. From the reviewed checkout on the Orange Pi:
 
 ```bash
+git fetch origin
 git switch experiment/orange-pi-zero3w-audio
 git pull --ff-only
 uname -m
@@ -305,6 +306,12 @@ Zero 3W DTB built from the inspected vendor source, alongside the MCU overlay.
 Protected-property comparisons passed. That source-built DTB is **not** the
 exact installed Armbian artifact; board-side `check` validates that artifact
 and its actual enabled overlays. No new kernel module is built here.
+
+The operator then ran `check --runtime-user` from commit `fbd3f02` on the
+Orange Pi target. It reported that audio prerequisites and offline composition
+passed against the installed DTB and enabled overlays, with no installation or
+activation performed. This clears that preflight gate; runtime audio binding,
+permissions and signal behaviour remain untested.
 
 Focused tests cover real composition, MCU/HDMI/PB4 preservation, conflicts,
 missing prerequisites, MCU policy gates, repeat installation, ownership,
