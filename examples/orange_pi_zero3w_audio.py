@@ -14,7 +14,8 @@ import time
 import wave
 
 RATE = 48000
-PEAK = int(0.01 * (2 ** 31 - 1))  # -40 dBFS; identical slots avoid channel guessing.
+PEAK = int(0.05 * (2 ** 31 - 1))  # 5% (-26.02 dBFS), operator-confirmed test level.
+MAX_SECONDS = 5
 
 
 def context(sysfs=Path('/sys'), procfs=Path('/proc'), dev=Path('/dev')):
@@ -65,11 +66,34 @@ def owns_running_pcm(status, pid):
 
 
 def tone():
+    """Three seconds, 440 Hz from 0.5 to 2.5 s, with 20 ms linear fades."""
     result = array.array('i')
-    for i in range(RATE):
-        sample = int(PEAK * math.sin(2 * math.pi * 440 * i / RATE)) if RATE * .3 <= i < RATE * .9 else 0
+    start, end, fade = RATE // 2, RATE * 5 // 2, RATE // 50
+    for i in range(3 * RATE):
+        sample = 0
+        if start <= i < end:
+            gain = min(1, (i - start) / fade, (end - 1 - i) / fade)
+            sample = int(PEAK * gain * math.sin(2 * math.pi * 440 * (i - start) / RATE))
         result.extend((sample, sample))
     return result
+
+
+def write_wav(path, samples):
+    """Create only a new file; never replace a recording or prior test WAV."""
+    encoded = array.array('i', samples)
+    if sys.byteorder != 'little':
+        encoded.byteswap()
+    with Path(path).open('xb') as destination:
+        with wave.open(destination, 'wb') as output:
+            output.setparams((2, 4, RATE, 0, 'NONE', 'not compressed'))
+            output.writeframes(encoded.tobytes())
+
+
+def generate(path):
+    write_wav(path, tone())
+    print('Generated:', Path(path).resolve())
+    print('48000 Hz / S32_LE / 2 identical interleaved channels / 144000 frames / 3 seconds')
+    print('440 Hz from 0.5 to 2.5 seconds; 20 ms linear fades; peak <= 5% (-26.02 dBFS)')
 
 
 def wav_samples(path):
@@ -77,8 +101,8 @@ def wav_samples(path):
         if (source.getframerate(), source.getsampwidth(), source.getnchannels(), source.getcomptype()) != (RATE, 4, 2, 'NONE'):
             raise ValueError('Require an uncompressed 48 kHz / signed 32-bit LE / stereo WAV')
         count = source.getnframes()
-        if not 0 < count <= 5 * RATE:
-            raise ValueError('Recording must contain at most five seconds')
+        if not 0 < count <= MAX_SECONDS * RATE:
+            raise ValueError('WAV must contain at most five seconds')
         data = source.readframes(count)
         if len(data) != count * 8:
             raise ValueError('Truncated WAV data')
@@ -106,49 +130,37 @@ def replay_samples(samples, channel=None):
     highest = max(abs(v) for v in samples)
     if not highest:
         raise ValueError('Selected recording/channel is silent')
-    return array.array('i', [0] * int(.3 * RATE) * 2) + \
-        array.array('i', (int(v * PEAK / highest) for v in samples))
+    return array.array('i', (int(v * PEAK / highest) for v in samples))
 
 
-def playback(samples, pcm, speaker, status, factory=subprocess.Popen, sleep=time.sleep):
-    # Guard and cleanup precede every process/enable operation.
+def playback(path, pcm, speaker, status, factory=None, sleep=time.sleep):
+    # Validate without rewriting the WAV: standalone aplay can use identical bytes.
+    samples = wav_samples(path)
+    if max(abs(v) for v in samples) > PEAK:
+        raise ValueError('Playback WAV exceeds the experimental 5% peak bound; use generate or replay')
     if speaker.read_text().strip() != '0':
         raise RuntimeError('Speaker must already be off')
+    if status.read_text().strip() != 'closed':
+        raise RuntimeError('Playback PCM is already open; stop its owner before this experiment')
     proc = None
     try:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'bounded.wav'
-            with wave.open(str(path), 'wb') as output:
-                output.setparams((2, 4, RATE, 0, 'NONE', 'not compressed'))
-                encoded = array.array('i', samples)
-                # Keep clocks running through a trailing half-second of silence,
-                # allowing the normal path to mute before aplay closes the PCM.
-                encoded.extend([0] * RATE)
-                if sys.byteorder != 'little':
-                    encoded.byteswap()
-                output.writeframes(encoded.tobytes())
-            proc = factory(['aplay', '-q', '-D', pcm, '--buffer-time=100000',
-                            '--period-time=20000', str(path)], start_new_session=True)
-            deadline = time.monotonic() + 2
-            while not owns_running_pcm(status, proc.pid):
-                if proc.poll() is not None or time.monotonic() >= deadline:
-                    raise RuntimeError('Own playback PCM did not reach RUNNING; speaker remains off')
-                sleep(.01)
-            # Pi codec uses a 5 ms amp delay. Leave 50 ms after RUNNING here;
-            # the fixed test sound also begins with 300 ms of digital silence.
-            sleep(.05)
-            if proc.poll() is not None or not owns_running_pcm(status, proc.pid):
-                raise RuntimeError('Playback ended before speaker enable')
-            speaker.write_text('1')
-            mute_at = time.monotonic() + len(samples) / (2 * RATE) - .05
-            while time.monotonic() < mute_at:
-                if proc.poll() is not None:
-                    raise RuntimeError('Playback stopped early; muting speaker')
-                sleep(.01)
-            speaker.write_text('0')
-            result = proc.wait(timeout=2)
-            if result:
-                raise RuntimeError(f'aplay exited with status {result}')
+        # Reproduce the successful manual sequence, not a universal hardware rule.
+        # Cleanup is armed before enabling, including failure to create aplay.
+        speaker.write_text('1')
+        proc = (factory or subprocess.Popen)(['aplay', '-v', '-D', pcm, str(path)],
+                                             start_new_session=True)
+        deadline = time.monotonic() + 2
+        while not owns_running_pcm(status, proc.pid):
+            result = proc.poll()
+            if result is not None:
+                raise RuntimeError(f'aplay exited with status {result} before own PCM RUNNING was observed')
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Own playback PCM did not reach RUNNING; muting speaker')
+            sleep(.01)
+        print(f'Own playback PCM RUNNING; owner_pid={proc.pid}')
+        result = proc.wait(timeout=len(samples) / (2 * RATE) + 2)
+        if result:
+            raise RuntimeError(f'aplay exited with status {result}')
     finally:
         try:
             speaker.write_text('0')
@@ -180,23 +192,31 @@ def capture(output, pcm, factory=subprocess.Popen):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('check', 'capture', 'playback', 'replay'))
+    parser.add_argument('action', choices=('generate', 'check', 'capture', 'playback', 'replay'))
     parser.add_argument('--output', type=Path)
     parser.add_argument('--input', type=Path)
     parser.add_argument('--channel', type=int, choices=(0, 1),
                         help='Replay one captured channel in both output slots; raw WAV is unchanged')
     args = parser.parse_args()
-    if os.geteuid() == 0:
-        parser.error('Run the ALSA checks as the configured runtime user, without sudo')
-    if args.action == 'capture' and args.output is None:
-        parser.error('capture requires --output for a new WAV file')
+    if args.action in ('generate', 'capture') and args.output is None:
+        parser.error(args.action + ' requires --output for a new WAV file')
+    if args.output is not None and args.action not in ('generate', 'capture'):
+        parser.error('--output applies only to generate or capture')
+    if args.input is not None and args.action not in ('playback', 'replay'):
+        parser.error('--input applies only to playback or replay')
     if args.action == 'replay' and args.input is None:
         parser.error('replay requires --input')
     if args.channel is not None and args.action != 'replay':
         parser.error('--channel applies only to replay')
+    # Generation is stdlib file I/O only, even on a host without ALSA/sysfs.
+    if args.action == 'generate':
+        generate(args.output)
+        return
+    if os.geteuid() == 0:
+        parser.error('Run the ALSA checks as the configured runtime user, without sudo')
     def terminate(signum, frame):
         raise KeyboardInterrupt
-    signal.signal(signal.SIGTERM, terminate)
+    previous = signal.signal(signal.SIGTERM, terminate)
     try:
         pcm, speaker, status = context()
         print('Explicit PCM:', pcm, '; profile: 48000 Hz / S32_LE / 2 channels')
@@ -204,16 +224,22 @@ def main():
             print('Speak a short phrase during the five-second recording; speaker remains off.')
             capture(args.output, pcm)
         elif args.action in ('playback', 'replay'):
-            samples = tone()
-            if args.action == 'replay':
-                samples = replay_samples(wav_samples(args.input), args.channel)
-                if args.channel is not None:
-                    print(f'Monitoring capture channel {args.channel} in both playback slots; peak remains 1%.')
-            playback(samples, pcm, speaker, status)
+            if args.action == 'playback' and args.input is not None:
+                playback(args.input, pcm, speaker, status)
+            else:
+                samples = tone() if args.action == 'playback' else replay_samples(wav_samples(args.input), args.channel)
+                if args.action == 'replay':
+                    print(f'Monitor copy: peak <= 5%; capture channel={args.channel}; raw WAV unchanged.')
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / 'bounded.wav'
+                    write_wav(path, samples)
+                    playback(path, pcm, speaker, status)
         else:
             print('Non-root device access and speaker-off checks passed; no stream started.')
     except KeyboardInterrupt:
         raise SystemExit(130)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 if __name__ == '__main__':

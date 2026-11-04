@@ -3,9 +3,10 @@
 This explicitly opt-in audio experiment builds on merged PR #3 at `v1` commit
 `eab2929`. Target only: Orange Pi Zero 3W / A733, aarch64, Armbian 26.8.3 /
 Ubuntu resolute, kernel `6.6.98-vendor-sun60iw2`, directly mounted Fusion HAT+.
-Read the [core guide](orange-pi-zero3w-install.md) first. Orange Pi audio remains
-pending operator validation. Missing chip part numbers do **not** block this
-bounded experiment: the working Pi implementation and live reference data
+Read the [core guide](orange-pi-zero3w-install.md) first. Audible manual playback
+is operator-confirmed; the updated helper rerun, microphone intelligibility and
+physical/interruption cleanup remain pending. Missing chip part numbers do
+**not** block this bounded experiment: the working Pi implementation and live reference data
 establish one operating profile, without identifying the chips.
 
 ## Evidence and selected profile
@@ -35,13 +36,13 @@ its existing embodied-runtime application. A standalone command reproducing
 that result has not yet been supplied. Read-only inspection of the application's
 [WAV playback path][reference-playback] at commit
 `4216a0db49d24746583a8dffe5796a2e54bbce8f` shows MCU speaker enable **before**
-`aplay --quiet`, using the configured ALSA default. The experiment instead opens
-an explicit hardware PCM and enables the MCU speaker switch after RUNNING.
+`aplay --quiet`, using the configured ALSA default. The original experiment
+opened an explicit hardware PCM and enabled the MCU switch after RUNNING.
 The existing [Fusion Python functions](../fusion_hat/device.py) write the same
 speaker sysfs `1`/`0` values. Actual installed library behaviour and ALSA routing
 on the reference remain to be checked; the inspected application revision is
-not a claim about its deployed revision. This is a concrete sequencing/routing
-comparison, not proof of the cause of silence.
+not a claim about its deployed revision. The later Orange Pi manual success
+below supplies direct target evidence; no application integration is added.
 
 The fork's [Pi overlay](sunfounder-fusionhat-overlay.dts) connects that software
 implementation. In the inspected Raspberry Pi 6.18 source family at revision
@@ -57,6 +58,19 @@ implementation. In the inspected Raspberry Pi 6.18 source family at revision
 That inspected revision is 6.18.60, not the reference binary's exact revision;
 the live reference capture independently confirms the selected PCM profile.
 
+On the Orange Pi target, the operator then generated a persistent three-second
+WAV: 48000 Hz, signed 32-bit little-endian, identical stereo channels, 440 Hz
+from 0.5 to 2.5 seconds with 20 ms boundary fades. The initial 1% peak version
+was barely audible. Multiplying those samples by five produced the 5% test.
+Without sudo, the operator enabled the MCU speaker attribute, ran
+`aplay -v audio-test-5pct.wav`, and disabled it through shell EXIT cleanup.
+**Playback at 5% was explicitly confirmed audible; cached speaker readback was
+`0` afterward.** The default route resolved to a Plug PCM backed by hardware
+card `fusionhat-audio`, device 0, RW_INTERLEAVED / S32_LE / 2 channels / exact
+rate 48000. This confirms that manual path, not a global-default configuration
+change or a fixed card index. The updated helper below still needs a target
+rerun with the same WAV bytes and its explicitly discovered HAT PCM.
+
 | Property | Selected configuration |
 | --- | --- |
 | PCM | 48000 Hz, S32_LE, two interleaved channels; 32-bit container, not an ADC precision claim |
@@ -65,7 +79,7 @@ the live reference capture independently confirms the selected PCM profile.
 | Serial frame | Two 32-bit slots, 64 BCLKs per frame |
 | Expected clocks | LRCLK 48 kHz, BCLK 3.072 MHz: derived settings, not measured waveforms |
 | External MCLK | Not routed; Pi audio uses four serial signals, PB4 is excluded |
-| Playback | Identical, low-amplitude samples in both slots |
+| Test playback | Identical slots; 5% digital peak (-26.02 dBFS), three-second faded tone |
 | Capture | Both slots, unchanged |
 | Speaker | Existing MCU sysfs switch, command `0x31`; no new host GPIO mapping |
 
@@ -102,15 +116,19 @@ was not evidence that pinctrl support was missing. Registered DAIs were
 | Audio DIP routing / speaker connection | Operator verifies while audio is inactive; switch position cannot be established in software |
 | Chip identities, full rate range, true ADC precision | Not prerequisites for this one reproduced profile |
 | Capture slot/downmix choice or amplifier channel selection | Retain both capture slots and duplicate playback samples |
-| Actual Orange Pi clocks, audible playback and intelligible capture | Experimental outcomes, not already established facts |
-| Pi GPIO16 SDMODE dependency on this HAT revision | Not transplanted; test existing MCU control with clocks running, stop on failure |
+| Actual Orange Pi clock waveforms | Not measured; derived settings only |
+| Audible playback | Manual 5% test passed; updated explicit-device helper rerun pending |
+| Intelligible capture | Nonzero PCM data reported; listening confirmation pending |
+| Pi GPIO16 SDMODE dependency on this HAT revision | Not transplanted; manual Orange Pi playback succeeded with the existing MCU control |
 
 The Pi codec delays GPIO16 amplifier enable by 5 ms. That does not establish a
-need to claim Orange Pi physical pin 36. Here playback starts muted, waits for
-PCM RUNNING plus 50 ms, then enables the existing MCU switch. Normal completion
-mutes during trailing silence before PCM closure. This is a bounded sequencing
-choice to validate, not a datasheet guarantee. Do not increase amplitude or add
-other pins/clocks to work around an initial failure.
+need to claim Orange Pi physical pin 36. The updated helper follows the successful
+manual sequence: arm cleanup, enable the existing MCU switch, start `aplay`, then
+mute after it finishes. This sequence is verified for the manual experiment,
+not established as universally necessary. The original helper also differed in
+amplitude, duration and buffering; no single variable is identified as the cause
+of its reported silence. Use the confirmed bounded 5% level for this experiment.
+No new pins, clock routing or global ALSA changes follow from this result.
 
 ## Implementation and ownership
 
@@ -266,33 +284,84 @@ file exclusively, preserves raw stereo samples, requires five seconds and
 reports channel peak/RMS. Negotiation errors or zero/missing data need inspection;
 nonzero data alone is not intelligibility. Partial recordings are retained.
 
-## 5. Short low-volume playback, then recording review
+## 5. Generate a persistent test WAV, play it, then review the recording
 
-The explicit tone uses 440 Hz, 1% digital peak (-40 dBFS), identical slots,
-300 ms silent pre-roll and a trailing mute window:
+The hardware-independent `generate` action uses only Python's standard library.
+It requires no HAT, root, sysfs, ALSA device or audio program. It creates a new
+file exclusively and prints its path and signal parameters. Choose a fresh
+path; existing files are refused. This directory is retained in your home:
 
 ```bash
-"$venv_python" examples/orange_pi_zero3w_audio.py playback
+audio_test_dir=$(mktemp -d "$HOME/fusion-hat-audio-test.XXXXXX")
+audio_test="$audio_test_dir/audio-test-5pct.wav"
+"$venv_python" examples/orange_pi_zero3w_audio.py generate --output "$audio_test"
+"$venv_python" examples/orange_pi_zero3w_audio.py playback --input "$audio_test"
 cat /sys/class/fusion_hat/fusion_hat/speaker
+```
+
+The WAV is 144000 frames / three seconds at 48000 Hz / S32_LE / stereo. Both
+channels are identical. A 440 Hz tone runs from 0.5 to 2.5 seconds, with 20 ms
+linear fades; digital peak is bounded to 5% (-26.02 dBFS). This matches the
+successful signal parameters; the original operator-generated bytes are not
+claimed identical to this new generator. The helper and standalone commands
+can now use the **same persistent file**. `playback` without `--input` generates
+the same signal in a temporary file instead.
+
+Before enable, the helper validates the fixed WAV format, duration (at most
+five seconds), peak (at most 5%), speaker-off state and that the playback PCM
+is closed. After arming cleanup it writes speaker `1`, then starts
+`aplay -v -D <discovered-hw-PCM> <file>` with normal ALSA buffering. It keeps the
+`RUNNING`/`owner_pid` check as a diagnostic of its own child, rather than a
+condition for delayed speaker enable. A busy preflight PCM is refused;
+ownership/open failures after launch mute and stop only its child. The check
+does not lock out a concurrent external process; stop other audio users first.
+The WAV is not rewritten, normalized or padded for `playback --input`.
+
+For an optional standalone comparison with identical bytes, use the explicit
+card ID printed by the helper's `check` (the reported target ID is
+`fusionhataudio`; substitute if different). Do not select card index 0 or change
+the system default. This bounded shell sequence mirrors the successful manual
+test; keep other audio users stopped:
+
+```bash
+hat_pcm=hw:CARD=fusionhataudio,DEV=0
+(
+  speaker=/sys/class/fusion_hat/fusion_hat/speaker
+  [ "$(cat "$speaker")" = 0 ] || exit 1
+  trap 'printf "0\n" > "$speaker"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  printf '1\n' > "$speaker" || exit 1
+  aplay -v -D "$hat_pcm" "$audio_test"
+)
+cat /sys/class/fusion_hat/fusion_hat/speaker
+```
+
+Review the **existing raw microphone recording separately**, using the retained
+`$recording` directory from step 4. Replay prepares a temporary monitor copy
+normalized to a maximum 5% peak, without added pre-roll, so the five-second
+duration limit also applies to playback. It does not modify the raw WAV:
+
+```bash
 "$venv_python" examples/orange_pi_zero3w_audio.py replay --input "$recording/microphone.wav" --channel 0
 cat /sys/class/fusion_hat/fusion_hat/speaker
 ```
 
-The helper requires PCM RUNNING with `owner_pid` equal to its own `aplay` child,
-waits another 50 ms, enables the existing speaker
-switch, then attempts mute before normal PCM closure. Replay bounds peak to
-1%. `--channel 0` duplicates that captured channel into both output slots for
+`--channel 0` duplicates that captured channel into both output slots for
 monitoring; `--channel 1` selects the other one. This does not change the raw
 stereo recording or establish a hardware downmix policy. Without the option,
 replay preserves stereo, which can be silent if the amplifier uses the empty
-slot. Expect an audible short tone, intelligible speech on
-replay, and speaker readback `0` after each action. Do not raise amplitude to
-bypass a failed initial result. The retained WAV can also be heard on a known
+slot. The updated helper should reproduce the audible manual tone; this rerun
+is still pending. Report whether the recorded phrase is intelligible and
+speaker readback is `0` after each action. A tone does not validate the mic.
+The retained WAV can also be heard on a known
 working system to check intelligibility independently of Orange Pi playback.
 
 Normal completion, exceptions, Ctrl-C and SIGTERM attempt speaker-off and stop
 only the helper's child process. Child sessions prevent terminal Ctrl-C from
-stopping clocks before the parent attempts mute. Readback is cached driver
+reaching the child before the parent attempts mute. On normal completion, mute
+follows `aplay` completion, as in the successful manual test; continuous clocks
+through mute are not promised. Readback is cached driver
 state, not a physical measurement. SIGKILL, power loss, failed I2C writes and
 external processes can defeat cleanup; stop tests and remove speaker power if
 uncertain. Do not use raw I2C, global mixer repair or Pi setup.
@@ -348,12 +417,15 @@ The operator subsequently installed from the checkout, rebooted and reported:
   PCM0 playback and capture nodes were `660 root fusionhat-audio` after reboot.
 - Non-root capture negotiated 48000 / S32_LE / stereo and returned five seconds.
   Channel 0 peak/RMS were 0.314636/0.014814; channel 1 was zero.
-- Tone/replay processes completed and speaker-off cache readback was `0`.
-  The operator confirmed both tone and replay were silent; audible playback and
-  intelligibility are not passed checks. Stereo replay's empty second slot is
-  one hypothesis for replay, not a demonstrated cause, and cannot explain a
-  silent tone that already duplicates data into both slots. Selected-channel
-  monitoring keeps the same 1% peak for an independent replay check.
+- The original 1% short-tone/replay helper completed with cached speaker `0`,
+  but both were reported silent. This historical result motivated the persistent
+  test file and changes to sequencing, level, duration and buffering; it does
+  not isolate any one variable as the cause.
+- The later manual three-second faded tone was barely audible at 1% and
+  explicitly audible at 5%. MCU enable preceded `aplay -v`; shell EXIT cleanup
+  disabled it, with cached readback `0`. The default Plug PCM reached the
+  intended HAT at exact 48000 / S32_LE / stereo. This is operator hardware
+  evidence for manual playback, not yet a pass for the updated helper.
 - Mixer controls reported clock delay 0, clock keep off, loopback off, RX sync
   off, TX hub off and TX trigger bypass off. These match normal DMA operation;
   no playback-volume/mute control was exposed. The operator reported that the
@@ -362,31 +434,37 @@ The operator subsequently installed from the checkout, rebooted and reported:
   `io_disabled`, owned by `2532000.i2s0_plat`. This matches the sleep-state
   selection described above; active-stream pin state remains to be checked.
 - The identical 1% tone was also reported silent through the existing
-  Raspberry Pi driver, despite operator-confirmed audible playback through
-  the existing application. This comparison has not reproduced the working
-  application path. It does not identify the Orange Pi overlay or GPIO16
-  handling as the cause. Compare the application's speaker sequencing and
-  ALSA route, and inspect active-stream pin state, before changing routing or
-  amplitude.
+  Raspberry Pi driver, despite operator-confirmed application playback there.
+  The subsequent Orange Pi manual success is stronger target playback evidence;
+  no further reference-system change is a prerequisite for this helper update.
 
 The startup `No 'sound-dai' property` message is consistent with the intentional
 dummy endpoint fallback. Missing clock-post-delay/default-format warnings and
 duplicate debugfs entries were also reported, including duplicate entries for
-HDMI. Card registration/capture succeeded; these messages alone do not identify
-the cause of silent playback. Preserve them alongside mixer/pin/physical results.
+HDMI. Card registration/capture and later manual audible playback succeeded;
+these messages alone do not identify the original helper failure.
 
 Focused tests cover real composition, MCU/HDMI/PB4 preservation, conflicts,
 missing prerequisites, MCU policy gates, repeat installation, ownership,
-rollback, scoped grants, explicit card/profile selection and mocked stream
-cleanup including Ctrl-C. The existing suite is run too. Cloud Python is
-3.12/x86_64; target Python 3.14 capture/stream completion now has the operator
-results above. No hardware installer,
+rollback, scoped grants, explicit card/profile selection, persistent WAV signal
+properties, generation without hardware, overwrite refusal and bounded replay.
+Stream tests mock PCM/speaker/subprocesses, including creation failure, nonzero
+exit, ownership failure and Ctrl-C/SIGTERM cleanup; real signals are delivered
+only to the mocked test process. These are not hardware interruption tests.
+The full suite passed 73 tests, including 30 audio cases, with no skips. Actual
+CLI generation and refusal to overwrite also passed without hardware. Python
+compilation, nine Bash guide blocks (syntax only) and whitespace/naming checks
+passed. Cloud Python is 3.12/x86_64; target Python 3.14
+capture/stream completion has the operator results above. No hardware installer,
 PCM stream or speaker operation was run in the cloud.
 
 Reference capture and Orange Pi pin/DAI results above are operator-provided
 hardware evidence. Target binding, permission metadata and stream completion
-after reboot are reported above. Audible playback, intelligible capture and
-physical timing/cleanup remain pending.
+after reboot and audible manual playback are reported above. The updated helper
+rerun, intelligible microphone speech, physical waveforms/cleanup, hardware
+interruption cleanup and permission reapplication after later audio-device
+recreation remain pending. The final helper milestone requires an audible
+operator rerun with the persistent WAV and speaker-off cached readback.
 The Pi implementation/installer/overlay are unchanged; Raspberry Pi hardware
 regression testing was not performed. No STT/TTS, wake-word, runtime, servo,
 automatic shutdown or general-purpose host GPIO changes are included.
