@@ -226,6 +226,11 @@ The vendor may call the card `sndi2s0`; selection uses actual DT ancestry/ID.
 The helper rejects other cards and requires non-root access. Its `check` action
 opens no PCM and enables no speaker. Python uses only the standard library;
 no pip, audio server, voice packages or default-device replacement is needed.
+After a stream closes, PB5..PB8 can report `io_disabled` while remaining owned
+by `2532000.i2s0_plat`. This is the overlay's sleep state: the matching
+[ASoC PCM cleanup][pcm-sleep] selects sleep when the component becomes inactive,
+and [PCM open][pcm-open] selects default again. An idle pin dump therefore
+does not establish whether PB7 was muxed to I2S during playback.
 For failures preserve the output and relevant logs:
 
 ```bash
@@ -340,6 +345,14 @@ The operator subsequently installed from the checkout, rebooted and reported:
   off, TX hub off and TX trigger bypass off. These match normal DMA operation;
   no playback-volume/mute control was exposed. The operator reported that the
   audio switch position matches the working Raspberry Pi reference.
+- After the streams closed, PB4 remained unclaimed and PB5..PB8 reported
+  `io_disabled`, owned by `2532000.i2s0_plat`. This matches the sleep-state
+  selection described above; active-stream pin state remains to be checked.
+- The identical 1% tone was also reported silent through the existing
+  Raspberry Pi driver. This comparison has not established an audible
+  reference baseline. It does not identify the Orange Pi overlay or GPIO16
+  handling as the cause. Establish a known audible reference command and
+  inspect active-stream pin state before changing routing or amplitude.
 
 The startup `No 'sound-dai' property` message is consistent with the intentional
 dummy endpoint fallback. Missing clock-post-delay/default-format warnings and
@@ -376,5 +389,7 @@ automatic shutdown or general-purpose host GPIO changes are included.
 [mach-utils]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/bsp/drivers/sound/platform/snd_sunxi_mach_utils.c#L450
 [i2s-dai]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/bsp/drivers/sound/platform/snd_sunxi_i2s.c#L1680
 [i2s-mclk]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/bsp/drivers/sound/platform/snd_sunxi_i2s.c#L825
+[pcm-sleep]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/sound/soc/soc-pcm.c#L717
+[pcm-open]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/sound/soc/soc-pcm.c#L798
 [pi-codec]: https://github.com/raspberrypi/linux/blob/a4985478de14b3a83c8e04fed68377c1bdae735d/sound/soc/bcm/googlevoicehat-codec.c#L137
 [pi-machine]: https://github.com/raspberrypi/linux/blob/a4985478de14b3a83c8e04fed68377c1bdae735d/sound/soc/bcm/rpi-simple-soundcard.c#L124
