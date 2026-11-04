@@ -1,6 +1,30 @@
 #!/bin/sh
-set -eu
+set -e
 case "${1:-}" in prereqs) exit 0 ;; esac
 . /usr/share/initramfs-tools/hook-functions
-manual_add_modules fusion_hat
-copy_file config /etc/modprobe.d/fusion-hat-core.conf
+
+# The shared helpers use optional/unset variables; they are not nounset-safe.
+: "${DESTDIR:?Missing initramfs staging directory}"
+: "${version:?Missing initramfs kernel version}"
+if ! manual_add_modules fusion_hat; then
+    echo "fusion-hat-core: adding the module to initramfs failed" >&2
+    exit 1
+fi
+
+policy=/etc/modprobe.d/fusion-hat-core.conf
+if copy_file config "$policy"; then
+    :
+else
+    status=$?
+    # copy_file's documented status 1 means the target already exists.
+    # Do not accept real copy errors or assume an existing policy is correct.
+    if [ "$status" -ne 1 ]; then
+        echo "fusion-hat-core: copying shutdown policy failed (status $status)" >&2
+        exit "$status"
+    fi
+fi
+if [ -L "${DESTDIR}${policy}" ] || ! cmp -s "$policy" "${DESTDIR}${policy}"; then
+    echo "fusion-hat-core: staged shutdown policy is missing or differs from the installed policy" >&2
+    exit 1
+fi
+exit 0

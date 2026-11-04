@@ -158,7 +158,7 @@ class Installation:
         user = pwd.getpwnam(runtime_user)
         if user.pw_uid == 0:
             raise ValueError("Select a non-root runtime user")
-        for tool in ("dtc", "fdtget", "fdtoverlay", "modinfo", "depmod", "update-initramfs",
+        for tool in ("dtc", "fdtget", "fdtoverlay", "modinfo", "depmod", "cmp", "update-initramfs",
                      "lsinitramfs", "udevadm", "groupadd", "groupdel", "gpasswd"):
             if not shutil.which(tool):
                 raise ValueError(f"Missing prerequisite tool: {tool}; no packages are installed automatically")

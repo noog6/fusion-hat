@@ -39,7 +39,7 @@ cat /etc/armbian-release
 cat /boot/armbianEnv.txt
 readlink -f /sys/bus/i2c/devices/i2c-0/of_node
 fdtget -t s /boot/dtb/allwinner/sun60i-a733-orangepi-zero3w.dtb /__symbols__ twi0
-command -v dtc fdtget fdtoverlay modinfo depmod update-initramfs lsinitramfs udevadm
+command -v dtc fdtget fdtoverlay modinfo depmod cmp update-initramfs lsinitramfs udevadm
 ls -l /boot/initrd.img-6.6.98-vendor-sun60iw2 /boot/uInitrd*
 ```
 
@@ -81,6 +81,17 @@ overlay in a temporary directory; it does not mutate installation/boot state.
 Missing prerequisites and existing conflicting module/options/ownership stop
 the operation with an explanation. Resolve these explicitly rather than using
 forced unbind/unload or overwriting configuration.
+
+An operator-reported build of the new driver and the installer/offline overlay
+check passed on this target. Installation then failed in the initramfs hook and
+reported successful rollback; persistent boot remains unverified. The hook now
+handles initramfs-tools' already-copied-file status and verifies the staged
+policy matches exactly, while keeping genuine copy/module errors fatal.
+After a completed rollback, pull the corrected checkout and repeat check/install;
+there is no need to rebuild an unchanged driver binary or reboot first. Missing
+firmware warnings from unrelated built-in drivers are separate from a fatal
+`fusion-hat-core` hook error. If a retry fails, preserve the full output,
+including the hook's module/policy-specific diagnostic.
 
 The installation owns only:
 
