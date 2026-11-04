@@ -1,4 +1,4 @@
-# Orange Pi Zero 3W / Armbian: experimental MCU readout (awaiting hardware validation)
+# Orange Pi Zero 3W / Armbian: experimental core MCU readout
 
 This procedure targets only the Orange Pi Zero 3W (Allwinner A733, aarch64),
 Armbian v26.8.3 / Ubuntu resolute, kernel `6.6.98-vendor-sun60iw2`. It does not
@@ -6,15 +6,35 @@ establish support for other Orange Pi boards or Armbian images. Use this local
 checkout; do **not** run `install.sh`, `make all`, `make install`, or `fusion_hat
 doctor --fix`. The existing Raspberry Pi installer and overlay are unchanged.
 
-The known hardware result is a user-reported firmware 1.0.2 read at address
-`0x17` on bus 0. A subsequent build on this target compiled all driver C files,
-but failed at MODPOST because IIO exports were absent. The installed header
-configuration has no `CONFIG_IIO`, and no `industrialio` module is available.
-The driver now omits the external ADC/IIO interface when IIO is not reachable;
-battery, firmware and USR-button interfaces are independent of it. With IIO built
-in or modular, the existing external ADC interface is retained. Rebuilding this
-fix, module loading and driver readouts remain pending. No audio, host GPIO,
-actuator or runtime integration is included here.
+## Reported target validation
+
+The following results were reported by the user for driver code at commit
+`36cc326b13bbd97fc8044082eb25b1c3ea1b774d` on the board/OS/kernel above:
+
+- Native module build passed against the matching installed vendor headers.
+  Vermagic was `6.6.98-vendor-sun60iw2 SMP preempt mod_unload aarch64`; module
+  dependencies were empty. The compiler-version warning and skipped BTF
+  generation did not prevent building or subsequent loading.
+- The bus-0 client at `0x17` bound to `/sys/bus/i2c/drivers/fusion_hat`.
+  `/sys/module/fusion_hat/parameters/disable_auto_shutdown` read `Y`.
+- Driver sysfs reported firmware `1.0.2`, battery `voltage_now=8385000` (8.385 V),
+  `status=Charging` and estimated `capacity=99` percent.
+- The USR-button sysfs value changed `0 -> 1 -> 0` on press/release.
+- After cleanup, both `/sys/bus/i2c/devices/0-0017` and
+  `/sys/module/fusion_hat` were absent.
+
+This completes the initial build/bind/core sysfs readout/cleanup milestone.
+Input-event delivery, Python/venv integration, actuators, audio, host GPIO,
+shutdown behavior and Raspberry Pi regressions have not been hardware-validated.
+Reading the shutdown opt-out parameter is not a power-button or low-battery
+shutdown test. These target results were not tests performed in the cloud.
+
+The installed header configuration has no `CONFIG_IIO`, and no `industrialio`
+module is available. The driver omits the external ADC/IIO interface when IIO is
+not reachable; battery, firmware and USR-button interfaces are independent of it.
+With IIO built in or modular, the existing external ADC interface is retained.
+The procedure below repeats the validated core checks and includes an additional
+input-event check that remains unverified on this target.
 
 ## 1. Prerequisites on the Orange Pi Zero 3W (read-only)
 
@@ -180,6 +200,7 @@ not use forced module removal. Removal has the output side effects described
 above; keep actuators disconnected throughout.
 
 Record the checkout SHA, build output, `uname -a`, parameter/binding/readouts,
-USR events, relevant `dmesg`, and cleanup result. The hardware milestone remains
-pending until these pass on the Orange Pi Zero 3W; a cloud check against another kernel cannot
-establish vendor-kernel or Raspberry Pi compatibility.
+USR state/events, relevant `dmesg`, and cleanup result for subsequent runs.
+The core milestone has the user-reported results above; input-event delivery and
+the other listed integrations remain unverified. A cloud check against another
+kernel cannot establish vendor-kernel or Raspberry Pi compatibility.
