@@ -191,7 +191,9 @@ venv_python=/absolute/path/to/existing/.venv/bin/python
 "$venv_python" examples/orange_pi_zero3w_core_check.py --button-seconds 20
 ```
 
-The helper checks for a venv and Python 3.14.4, installs only `evdev` plus build
+The helper checks for a venv and Python 3.14.4, and requires the selected
+interpreter's `Python.h` before pip runs if an installed `evdev` cannot be
+imported. It installs only `evdev` plus build
 tools (`setuptools`, `wheel`), then installs the local library with `--no-deps
 --no-build-isolation`. It leaves broad upstream metadata unchanged: optional
 voice/audio/display dependencies can still be reported missing by `pip check`.
@@ -202,7 +204,26 @@ dependencies and unrelated packages are left alone.
 
 `evdev` is a native extension. If pip cannot build it, save the actual compiler
 error and verify the selected interpreter's development headers/toolchain; the
-installer does not guess apt packages. Python 3.14.4 support remains pending
+installer does not guess apt packages. An operator-reported target attempt found
+`Python.h` missing from `/usr/include/python3.14`; this is a Python development
+header prerequisite, separate from the matching kernel headers already used to
+build the driver. Obtain the development package matching the selected base
+interpreter after inspecting installed/candidate versions. Driver reinstallation
+and reboot are not needed to retry this venv-only step.
+The reported installed interpreter and both available development packages were
+`3.14.4-1ubuntu0.2`. For that observed package state, the explicit prerequisite
+installation is:
+
+```bash
+sudo apt-get install python3.14-dev=3.14.4-1ubuntu0.2 \
+  libpython3.14-dev=3.14.4-1ubuntu0.2
+```
+
+This is a separate operator action, never run by the helper. Recheck package
+versions first if the interpreter or apt candidates have changed; do not upgrade
+the interpreter/kernel to bypass a mismatch. Then rerun the venv helper and
+readout/event check above as the non-root runtime user.
+Python 3.14.4 support remains pending
 actual installation/import results on this target.
 
 Core imports are `fusion_hat.device`, `battery`, `user_button`, `pwm` and `servo`.

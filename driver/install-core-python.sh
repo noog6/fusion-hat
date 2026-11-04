@@ -5,7 +5,7 @@ set -euo pipefail
 [[ $EUID != 0 ]] || { echo "Run as the intended runtime user, without sudo." >&2; exit 1; }
 venv_python=$1
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-"$venv_python" -c 'import sys; assert sys.prefix != sys.base_prefix, "Select an existing venv"; print(sys.version); assert sys.version_info[:3] == (3,14,4), "This experimental path targets Python 3.14.4"'
+"$venv_python" "$repo/driver/core_python_preflight.py"
 # No RPi.GPIO, voice/audio/display packages or global Python changes are needed.
 "$venv_python" -m pip install setuptools wheel evdev
 "$venv_python" -m pip install --no-deps --no-build-isolation "$repo"
