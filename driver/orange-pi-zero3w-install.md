@@ -5,8 +5,9 @@ Pi Zero 3W / Allwinner A733, aarch64, Armbian 26.8.3 / Ubuntu resolute, kernel
 `6.6.98-vendor-sun60iw2`, Python 3.14.4 and a directly connected Fusion HAT+.
 The operator has verified installation and binding after reboot with both policy
 flags enabled, the expected scoped permissions, and non-root Python 3.14.4
-firmware/battery access and USR press/release callbacks. Permission checks after
-device recreation and the single-servo experiment remain **pending operator
+firmware/battery access and USR press/release callbacks. The same policy,
+permissions and non-root readout/event checks also passed after a controlled
+unbind/rebind. The single-servo experiment remains **pending operator
 validation**. These are operator-provided hardware results, not cloud tests.
 The first milestone's temporary build/bind/readout/cleanup results are recorded
 in [the temporary bring-up guide](orange-pi-zero3w-bringup.md).
@@ -183,6 +184,13 @@ Repeat flag/binding/P0 ownership checks and rediscover the potentially new input
 event number. No one-time chmod or general `input`/`i2c` group membership is a
 substitute for these rules.
 
+With checkout `95836ba`, the operator completed this unbind/rebind procedure and
+reported both flags still `Y`, the expected Fusion binding, P0 and named USR
+permissions `660 root fusionhat-core`, and P1 `644 root root`. The non-root
+Python check then returned firmware `1.0.2`, battery `8.38 V`, `Charging`,
+estimated `99%`, and actual USR press/release callbacks again. This verifies
+permission reapplication for that device recreation on the stated target.
+
 ## 4. Python 3.14.4 in the existing venv, as the runtime user
 
 Set the **absolute interpreter path** for the existing runtime venv. Do not use
@@ -232,9 +240,9 @@ built and installed `evdev 2.0.0` (`cp314`, aarch64) and the local `fusion_hat
 1.14.0` package in the existing Python 3.14.4 venv from commit `41115e5`.
 Core imports passed without constructing devices. The non-root readout check
 reported firmware `1.0.2`, battery `8.39 V`, `Charging`, estimated `99%`, and actual
-USR press and release callbacks from the Fusion input device. This validates
-that readout/event path on the stated target; servo operation and permission
-reapplication after device recreation remain unverified.
+USR press and release callbacks from the Fusion input device. The same check
+subsequently passed after device recreation as recorded above. Servo operation
+remains unverified.
 
 Core imports are `fusion_hat.device`, `battery`, `user_button`, `pwm` and `servo`.
 They do not require `RPi.GPIO` or voice/audio packages. The readout script does
@@ -270,8 +278,8 @@ invoke (substitute the verified values otherwise):
 This uses the existing `Servo` interface, with pulse widths instead of angle
 assumptions: 1500, 1550, 1500, 1450, 1500 us with the example arguments, at 50 Hz.
 The min/max arguments declare the confirmed envelope; they are not commanded
-positions. The global
-envelope is 500..2500 us, step at most 100 us, and each dwell 0.2..2 seconds.
+positions. The global envelope is 500..2500 us, step at most 100 us, and each
+dwell 0.2..2 seconds.
 Those code limits are not proof that any particular servo is suitable.
 
 PWM/Servo construction **enables output before returning** and changes the timer
