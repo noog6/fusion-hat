@@ -3,8 +3,10 @@
 This procedure targets only the Orange Pi Zero 3W (Allwinner A733, aarch64),
 Armbian v26.8.3 / Ubuntu resolute, kernel `6.6.98-vendor-sun60iw2`. It does not
 establish support for other Orange Pi boards or Armbian images. Use this local
-checkout; do **not** run `install.sh`, `make all`, `make install`, or `fusion_hat
-doctor --fix`. The existing Raspberry Pi installer and overlay are unchanged.
+checkout for temporary bring-up; the [unified installer](unified-install.md) is
+now the staged persistent-install entry point. Do **not** run Pi `make all`,
+`make install`, or `fusion_hat doctor --fix` on Orange Pi. The Raspberry Pi
+overlay and standalone driver workflow remain separate.
 
 ## Reported target validation
 

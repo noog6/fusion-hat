@@ -3,8 +3,11 @@
 This explicitly opt-in audio experiment builds on merged PR #3 at `v1` commit
 `eab2929`. Target only: Orange Pi Zero 3W / A733, aarch64, Armbian 26.8.3 /
 Ubuntu resolute, kernel `6.6.98-vendor-sun60iw2`, directly mounted Fusion HAT+.
-Read the [core guide](orange-pi-zero3w-install.md) first. Audible manual and
-updated-helper playback are operator-confirmed at the bounded 5% test level.
+Read the [core guide](orange-pi-zero3w-install.md) first. The
+[unified `install.sh` guide](unified-install.md) documents staged dispatch,
+optional voice dependencies/user service/routing and later runtime evidence.
+This hardware-only installer still performs none of those application steps.
+Audible manual and updated-helper playback are operator-confirmed at the bounded 5% test level.
 Fresh microphone capture and channel-0 replay are also confirmed intelligible,
 but very quiet. Physical/interruption cleanup remains unverified. Missing chip
 part numbers do **not** block this bounded experiment: the working Pi
@@ -202,9 +205,7 @@ connections while inactive; remove power before changing switches/wiring.
 Keep the speaker off. From the reviewed checkout on the Orange Pi:
 
 ```bash
-git fetch origin
-git switch experiment/orange-pi-zero3w-audio
-git pull --ff-only
+git rev-parse HEAD  # use your reviewed v1-based checkout; do not replace local work
 uname -m
 uname -r
 cat /boot/armbianEnv.txt
@@ -501,9 +502,11 @@ volume remains a limitation. Physical waveforms/cleanup, hardware interruption
 cleanup and permission reapplication after later audio-device recreation remain
 pending. Speaker-off cached readback after replay is reported;
 continue checking it after each action. A cached value is not physical cleanup.
-The Pi implementation/installer/overlay are unchanged; Raspberry Pi hardware
-regression testing was not performed. No STT/TTS, wake-word, runtime, servo,
-automatic shutdown or general-purpose host GPIO changes are included.
+These historical hardware-audio results predate the unified dispatcher. The Pi
+overlay remains unchanged; the [unified guide](unified-install.md) describes the
+new orchestration and outstanding Raspberry Pi hardware regression acceptance.
+No STT/TTS behavior, wake-word, runtime, servo, automatic shutdown or
+general-purpose host GPIO changes are included.
 
 [opi-header]: https://github.com/orangepi-xunlong/wiringOP/blob/a7921ca2f5c124203be10d3418db70a2e15f3c10/gpio/readall.c#L797
 [opi-pins]: https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-zero3w.dts#L910

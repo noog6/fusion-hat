@@ -1,98 +1,51 @@
-#!/bin/bash
-# =============================================================================
-#  Fusion Hat Installer
-#  =============================================================================
-#  One-command install:
-#    curl -sSL https://raw.githubusercontent.com/sunfounder/fusion-hat/v1/install.sh | sudo bash
-#
-#  Custom branch:
-#    FUSION_HAT_BRANCH=develop sudo bash install.sh
-# =============================================================================
+#!/usr/bin/env bash
+# Unified entry point. Bootstrap needs existing bash, git and python3; no apt here.
+# curl -fsSL https://raw.githubusercontent.com/noog6/fusion-hat/v1/install.sh | sudo bash -s -- [options]
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
-set -e
-
-# ── Branch overrides (set via environment variable to test feature branches) ──
-FUSION_HAT_BRANCH="${FUSION_HAT_BRANCH:-v1}"
-INSTALLER_BRANCH="${INSTALLER_BRANCH:-main}"
-
-INSTALLER_URL="https://raw.githubusercontent.com/sunfounder/sunfounder-installer-scripts/refs/heads/${INSTALLER_BRANCH}/tools/installer_1.1.0.sh"
-
-# ── Source shared installer utilities ────────────────────────────────────────
-curl -fsSL "$INSTALLER_URL" -o /tmp/installer.sh
-if [ $? -ne 0 ]; then
-    echo "Network error: failed to download installer utilities."
-    echo "Please check your internet connection."
-    exit 1
+# A local source tree always wins, including uncommitted work. Never pull/reset it.
+installer_dir=''
+if [[ -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
+    installer_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fi
-source /tmp/installer.sh
-rm /tmp/installer.sh
-
-# ── Apt dependencies ─────────────────────────────────────────────────────────
-APT_INSTALL_LIST=(
-    "git"
-    "python3"
-    "raspi-config"
-    "python3-pip"
-    "i2c-tools"
-    "espeak"
-    "libsdl2-dev"
-    "libsdl2-mixer-dev"
-    "portaudio19-dev"
-    "sox"
-    "libsox-fmt-mp3"  # EdgeTTS MP3→WAV conversion
-    "libttspico-utils"
-    "dkms"
-)
-
-# ── Parse arguments ─────────────────────────────────────────────────────────
-SKIP_AUDIO_TEST=true   # skip speaker test during install; user runs it later
-for arg in "$@"; do
-    case $arg in
-        --plain-text) ;;
-        --skip-test) SKIP_AUDIO_TEST=true ;;
-        --test)      SKIP_AUDIO_TEST=false ;;
+if [[ ! -f ${installer_dir:-/nonexistent}/driver/install.py && -f $PWD/driver/install.py && -f $PWD/pyproject.toml ]]; then
+    installer_dir=$PWD
+fi
+if [[ -n $installer_dir && -f $installer_dir/driver/install.py ]]; then
+    exec python3 "$installer_dir/driver/install.py" "$@"
+fi
+# Piped/saved standalone script: resolve the requested ref ONCE, then execute
+# every installer and build asset from that immutable Git object.
+repository=${FUSION_HAT_REPOSITORY:-noog6/fusion-hat}
+requested_ref=${FUSION_HAT_BRANCH:-v1}
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+    case ${args[i]} in
+        --repo=*) repository=${args[i]#--repo=} ;;
+        --ref=*) requested_ref=${args[i]#--ref=} ;;
+        --repo|--ref)
+            ((i+1<${#args[@]})) || { echo "${args[i]} requires a value" >&2; exit 2; }
+            if [[ ${args[i]} == --repo ]]; then repository=${args[i+1]}; else requested_ref=${args[i+1]}; fi
+            i=$((i+1)) ;;
+        --help|-h)
+            echo 'Standalone bootstrap: --repo OWNER/REPO --ref BRANCH|TAG|SHA (defaults: noog6/fusion-hat v1).'
+            echo 'Stages: --core --audio --voice; selection: --runtime-user USER --venv /path or --python /venv/bin/python.'
+            echo 'Also: --check --verbose --platform auto|raspberry-pi|orange-pi --headers PATH --install-pulseaudio --set-audio-defaults --hat-idle-release.'
+            echo 'See driver/unified-install.md in the selected repository/ref for all options.'
+            exit 0 ;;
     esac
 done
-
-# ── Installation ─────────────────────────────────────────────────────────────
-
-TITLE "Install Fusion Hat Python Library\n"
-TITLE "Install dependencies"
-RUN "apt-get update" "Update apt"
-RUN "apt-get install -y ${APT_INSTALL_LIST[*]}" "Install apt dependencies"
-
-TITLE "Install fusion-hat library"
-CD "$HOME/" "Change to home directory"
-RUN "rm -rf $HOME/fusion-hat" "Remove existing fusion-hat library"
-RUN "git clone --depth=1 --branch ${FUSION_HAT_BRANCH} https://github.com/sunfounder/fusion-hat.git" \
-    "Clone fusion-hat library (${FUSION_HAT_BRANCH})"
-RUN "chown -R $USERNAME:$USERNAME $HOME/fusion-hat" \
-    "Change ownership of fusion-hat library to $USERNAME"
-
-TITLE "Install fusion-hat driver"
-CD "$HOME/fusion-hat/driver" "Change to driver directory"
-RUN "make all" "Compile driver"
-RUN "make install" "Install driver"
-RUN "make clean" "Clean driver"
-RUN 'config_txt_set "$INSTALLER_CONFIG_TXT_FILE" "dtoverlay=sunfounder-fusionhat"' \
-    "Enable driver in config.txt"
-
-TITLE "Install fusion-hat python library"
-CD "$HOME/fusion-hat" "Change to fusion-hat directory"
-RUN "pip3 install . --break-system-packages" "Install fusion-hat library"
-RUN "pip3 uninstall -y RPi.GPIO --break-system-packages" "Uninstall RPi.GPIO"
-RUN "register-python-argcomplete -s bash fusion_hat > /etc/bash_completion.d/fusion_hat" \
-    "Install tab completion"
-
-TITLE "Setup audio"
-if [ "$SKIP_AUDIO_TEST" = true ]; then
-    RUN "sudo bash $HOME/fusion-hat/fusion_hat/scripts/setup_fusion_hat_audio.sh --skip-test" \
-        "Setup audio"
-else
-    RUN "sudo bash $HOME/fusion-hat/fusion_hat/scripts/setup_fusion_hat_audio.sh" \
-        "Setup audio"
-fi
-
-installer_install
-
-installer_prompt_reboot "Remember to run 'fusion_hat speaker setup' to enable speaker after reboot."
+[[ $repository =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && $repository != *..* ]] || { echo 'Use --repo OWNER/REPO' >&2; exit 2; }
+[[ -n $requested_ref && $requested_ref != -* ]] || { echo 'Invalid --ref' >&2; exit 2; }
+for tool in git python3; do command -v "$tool" >/dev/null || { echo "Bootstrap requires existing $tool; install it explicitly or use a checkout." >&2; exit 1; }; done
+bootstrap_dir=$(mktemp -d "${TMPDIR:-/tmp}/fusion-hat-bootstrap.XXXXXXXX")
+trap 'rm -rf -- "$bootstrap_dir"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+git init -q "$bootstrap_dir/source"
+git -C "$bootstrap_dir/source" fetch -q --depth=1 "https://github.com/$repository.git" "$requested_ref"
+revision=$(git -C "$bootstrap_dir/source" rev-parse 'FETCH_HEAD^{commit}')
+git -C "$bootstrap_dir/source" checkout -q --detach "$revision"
+export FUSION_HAT_BOOTSTRAP_REPOSITORY="$repository" FUSION_HAT_BOOTSTRAP_REVISION="$revision"
+python3 "$bootstrap_dir/source/driver/install.py" "$@"

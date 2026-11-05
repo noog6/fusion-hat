@@ -146,7 +146,8 @@ class Installation:
             int.from_bytes(wrapped[12:16], "big") != len(payload) or wrapped[64:] != payload):
             raise ValueError("uInitrd payload does not match initrd.img; resolve the Armbian U-Boot hook before activation")
 
-    def preflight(self, headers, runtime_user):
+    def compatibility(self):
+        """Shared image/kernel authority; read-only and independent of install state."""
         if self.run(["uname", "-m"]) != "aarch64" or self.run(["uname", "-r"]) != RELEASE:
             raise ValueError(f"Only Orange Pi Zero 3W / aarch64 / {RELEASE} is supported here")
         board = settings(self.path("/etc/armbian-release").read_text())
@@ -155,6 +156,9 @@ class Installation:
         operating_system = settings(self.path("/etc/os-release").read_text())
         if operating_system.get("ID") != "ubuntu" or operating_system.get("VERSION_CODENAME") != "resolute":
             raise ValueError("This experimental procedure targets Ubuntu resolute only")
+
+    def preflight(self, headers, runtime_user):
+        self.compatibility()
         user = pwd.getpwnam(runtime_user)
         if user.pw_uid == 0:
             raise ValueError("Select a non-root runtime user")

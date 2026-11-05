@@ -1,0 +1,12 @@
+[
+  {
+    "name": "module-suspend-on-idle",
+    "argument": "",
+    "usage_counter": "n/a",
+    "properties": {
+      "module.author": "Lennart Poettering",
+      "module.description": "When a sink/source is idle for too long, suspend it",
+      "module.version": "17.0"
+    }
+  }
+]

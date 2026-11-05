@@ -6,10 +6,10 @@ import sys
 import sysconfig
 
 
-def check_environment():
+def check_environment(platform="orange-pi"):
     if sys.prefix == sys.base_prefix:
         raise RuntimeError("Select an existing venv interpreter")
-    if tuple(sys.version_info[:3]) != (3, 14, 4):
+    if platform == "orange-pi" and tuple(sys.version_info[:3]) != (3, 14, 4):
         raise RuntimeError("This experimental path targets Python 3.14.4")
     try:
         importlib.import_module("evdev")
@@ -29,6 +29,6 @@ def check_environment():
 if __name__ == "__main__":
     print(sys.version)
     try:
-        check_environment()
+        check_environment(sys.argv[1] if len(sys.argv) > 1 else "orange-pi")
     except RuntimeError as error:
         raise SystemExit(f"Core Python preflight: {error}")

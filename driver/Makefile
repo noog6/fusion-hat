@@ -4,6 +4,8 @@
 
 # Kernel build directory and current directory paths
 KDIR ?= /lib/modules/$(shell uname -r)/build
+# Unified installer stages activation at an explicit reboot. Legacy default stays.
+BOOT_ONLY ?= 0
 PWD := $(shell pwd)
 
 # Kbuild includes this file from the kernel directory, not the driver directory.
@@ -167,7 +169,7 @@ dkms_uninstall:
 install:
 	@echo "Installing Fusion Hat driver and device tree overlay..."
 	@# Unload module if loaded
-	-@sudo rmmod fusion_hat 2>/dev/null || echo "Module not currently loaded."
+	-@if [ "$(BOOT_ONLY)" != "1" ]; then sudo rmmod fusion_hat 2>/dev/null || echo "Module not currently loaded."; fi
 	@# Try DKMS first, fall back to traditional install if DKMS fails or is missing
 	@DKMS_OK=0; \
 	if command -v dkms >/dev/null 2>&1; then \
@@ -181,7 +183,7 @@ install:
 	fi
 	@$(MAKE) install-overlay
 	@echo "Loading fusion_hat module..."
-	@sudo modprobe fusion_hat || echo "Warning: Failed to load fusion_hat module. Please check the driver installation."
+	@if [ "$(BOOT_ONLY)" != "1" ]; then sudo modprobe fusion_hat || echo "Warning: Failed to load fusion_hat module. Please check the driver installation."; fi
 	@echo "Installation completed successfully."
 
 # Uninstall target - Remove module and device tree overlay

@@ -18,7 +18,6 @@ VERSION="2.0.0"
 # ── Configuration ────────────────────────────────────────────────────────────
 DTOVERLAY="googlevoicehat-soundcard"
 AUDIO_CARD_NAME="sndrpigooglevoi"                    # aplay -l short name
-ALSA_CARD_NAME="snd_rpi_googlevoicehat_soundcar"     # ALSA long name (31 chars)
 PA_CARD_NAME="snd_rpi_googlevoicehat_soundcar"       # PulseAudio card name
 HAT_NAME="Fusion Hat"
 ASOUND_CONF="/etc/asound.conf"
@@ -26,11 +25,58 @@ ASOUND_CONF="/etc/asound.conf"
 SKIP_TEST=false
 SKIP_DEPS=false
 
+# The unified installer uses this non-streaming path. The legacy standalone
+# workflow below remains available to operators explicitly running speaker setup.
+if [[ " $* " == *" --non-actuating "* ]]; then
+    runtime_user=''
+    user_source=''
+    while (( $# )); do
+        case $1 in
+            --runtime-user) runtime_user=${2:?--runtime-user requires USER}; shift ;;
+            --user-source) user_source=${2:?--user-source requires PATH}; shift ;;
+            --non-actuating|--skip-test|--keep-defaults) ;;
+            *) echo "Unsupported non-actuating audio option: $1" >&2; exit 2 ;;
+        esac
+        shift
+    done
+    [[ -n $runtime_user && $(id -u "$runtime_user") != 0 ]] || {
+        echo 'Non-actuating setup needs an explicit non-root --runtime-user.' >&2; exit 2;
+    }
+    # ALSA utilities only; service selection/routing belongs to --voice.
+    if ! command -v aplay >/dev/null || ! command -v arecord >/dev/null; then
+        apt-get update
+        apt-get install -y alsa-utils
+    fi
+    audio_repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+    audio_repo=${user_source:-$audio_repo}
+    runtime_home=$(getent passwd "$runtime_user" | cut -d: -f6)
+    sudo -H -u "$runtime_user" -- env -i -C "$runtime_home" PATH=/usr/bin:/bin HOME="$runtime_home" \
+        /usr/bin/python3 "$audio_repo/driver/voice_setup.py" --hardware-check --platform raspberry-pi
+    # Only named PCMs; preserve global defaults, user routing and existing stack.
+    alsa_named=/etc/alsa/conf.d/99-fusion-hat.conf
+    named_config='pcm.fusion_hat { type plug; slave.pcm "hw:CARD=sndrpigooglevoi,DEV=0"; }
+ctl.fusion_hat { type hw; card sndrpigooglevoi; }'
+    if [[ -e $alsa_named ]]; then
+        [[ $(cat "$alsa_named") == "$named_config" ]] || {
+            echo "Existing $alsa_named differs; inspect it explicitly before retrying." >&2; exit 1;
+        }
+    else
+        if [[ ! -d /etc/alsa/conf.d ]]; then
+            install -d -m 755 /etc/alsa/conf.d
+        fi
+        printf '%s\n' "$named_config" > "$alsa_named"
+        chmod 644 "$alsa_named"
+    fi
+    echo 'Pi audio card/permissions checked; named fusion_hat PCM configured. No streams or routing/default changes. Use --voice for user audio service/routing.'
+    exit 0
+fi
+
 # ── Detect desktop user ──────────────────────────────────────────────────────
 detect_user() {
     # Find the first non-root user with a running session
     for uid_dir in /run/user/*; do
-        local uid=$(basename "$uid_dir")
+        local uid
+        uid=$(basename "$uid_dir")
         if [ "$uid" -ge 1000 ] 2>/dev/null; then
             DESKTOP_USER=$(id -un "$uid" 2>/dev/null)
             DESKTOP_UID="$uid"
@@ -203,7 +249,7 @@ if [ -z "$RUN_AS_USER" ]; then
 else
     # Find Fusion Hat sink name (retry up to 10s)
     sink_name=""
-    for i in $(seq 1 10); do
+    for _ in $(seq 1 10); do
         sink_name=$($RUN_AS_USER pactl -f json list sinks 2>/dev/null | \
             jq -r ".[] | select(.properties[\"alsa.card_name\"] == \"$PA_CARD_NAME\") | .name" 2>/dev/null)
         [ -n "$sink_name" ] && break
@@ -248,9 +294,11 @@ if [ "$SKIP_TEST" = false ]; then
     play -n trim 0.0 0.5 2>/dev/null || true
 
     info "playing test sound..."
-    aplay /usr/share/sounds/alsa/Front_Center.wav 2>/dev/null && \
-        ok "speaker test passed!" || \
+    if aplay /usr/share/sounds/alsa/Front_Center.wav 2>/dev/null; then
+        ok "speaker test passed!"
+    else
         warn "speaker test failed — check volume or try 'fusion_hat speaker setup' again"
+    fi
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
