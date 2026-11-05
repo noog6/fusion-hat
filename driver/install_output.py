@@ -43,7 +43,7 @@ class InstallOutput:
         # Keep routing identity, explicit changes and recovery instructions
         # visible even when compiler/pip/device enumeration goes to the log.
         if line.startswith(('Verified HAT source:', 'User default routing', 'Prior routing saved:',
-                            'Recovery commands,', '  pactl ', 'Defaults preserved.')):
+                            'Recovery commands,', '  pactl ', 'Defaults preserved.', 'HAT idle ')):
             print(line, file=self.console, end='', flush=True)
         if line.startswith('Whole-venv pip check diagnostics remain'):
             self.report('Note: whole-venv pip check reports conflicts outside the verified core/voice profile. '

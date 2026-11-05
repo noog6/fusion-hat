@@ -121,6 +121,7 @@ the listed stages; add `--voice` explicitly if desired.
 | `--headers /path` | Prepared current-kernel Orange Pi headers/build tree; default `/lib/modules/6.6.98-vendor-sun60iw2/build`. |
 | `--install-pulseaudio` | With `--voice`, permit PulseAudio + utilities only when no existing audio stack is detected. Not a general Armbian requirement. |
 | `--set-audio-defaults` | With `--voice`, explicitly select the verified HAT microphone/source and sink, saving previous routing first. Without it, different defaults remain unchanged and voice routing is reported incomplete. |
+| `--hat-idle-release` | With Orange Pi `--voice`, explicitly persist immediate idle release for the verified HAT sink and actual microphone source on native PulseAudio 17. The idle module remains loaded; other devices keep their timeout settings. No sample-rate or routing configuration is written. `--check` verifies files, user-unit activation and application to the current server without changing them. |
 | `--platform auto\|raspberry-pi\|orange-pi` | Optional selection; still must pass detection and compatibility checks. |
 | `--verbose` | Also show detailed commands, package/build output and device enumeration on the console. These details are always saved in a private diagnostic log. Resume commands retain this option. |
 | `--plain-text`, `--skip-test`, `--test` | Accepted legacy arguments. Output is plain text and stream tests are always operator actions. `--test` prints the acceptance-guide location; it does not play/record. |
@@ -212,10 +213,103 @@ requires explicit repair; it is not replaced. If no stack is present, the
 observed Orange Pi solution can be requested with **`--voice
 --install-pulseaudio`**. That permits `apt-get install pulseaudio
 pulseaudio-utils` and user `daemon-reload` / start of `pulseaudio.socket` and
-`pulseaudio.service`. No user service is enabled for unattended boot or lingering
-by this installer. A missing DBus/user session prints remaining session commands
+`pulseaudio.service`. No lingering or before-login startup is enabled by this
+installer. The optional idle policy described below is attached to the existing
+PulseAudio user service. A missing DBus/user session prints remaining session commands
 and the complete resume command; log in as that user and rerun. Never run
 `sudo systemctl --user` or configure root's PulseAudio instance.
+
+Upstream also installs PulseAudio: its
+[`v1` audio script at `4bd1018`](https://github.com/sunfounder/fusion-hat/blob/4bd1018ad5a70ee113160536f969cdadd9f22918/fusion_hat/scripts/setup_fusion_hat_audio.sh)
+lists `pulseaudio` and `pulseaudio-utils` in `APT_PKGS`. It does not set the
+HAT-specific immediate idle-release property. The five-second idle hold is the
+native PulseAudio module's default, rather than a timer added by this fork.
+
+### HAT idle release on the observed Orange Pi/PulseAudio setup
+
+R6 below found that setting `module-suspend-on-idle.timeout=0` on the verified
+HAT sink and actual microphone source preserved working voice, removed matching
+clock errors during that trial and reduced measured handoff/playback waits.
+Keep the idle module loaded: it releases unused hardware. The sample-rate-forcing
+trial failed voice acceptance and remains rolled back.
+
+The explicit `--hat-idle-release` option persists the R6 policy. Exit HAT audio
+applications before the first application or a repair that needs policy reload:
+
+```bash
+sudo bash ./install.sh --voice --hat-idle-release --runtime-user "$(id -un)" \
+  --python /absolute/path/to/embodied-runtime/.venv/bin/python
+
+sudo bash ./install.sh --voice --hat-idle-release --check --runtime-user "$(id -un)" \
+  --python /absolute/path/to/embodied-runtime/.venv/bin/python
+```
+
+Bootstrap accepts the same option and retains it in the pinned resume command.
+It is limited to the validated Orange Pi path with native PulseAudio 17 managed
+by the runtime user's existing `pulseaudio.service`. Pi, PipeWire and other
+server/version policies are preserved; opting in on an incompatible server
+reports the stage incomplete without installing a replacement stack. No claim
+is made that all Armbian systems need this policy.
+
+The runtime account owns all policy files (mode 600):
+
+- `~/.config/systemd/user/fusion-hat-pulse-idle.service`;
+- the two Python helpers under `~/.local/libexec/fusion-hat-pulse-idle/`;
+- ownership hashes and original endpoint timeout values in
+  `~/.local/state/fusion-hat/pulse-idle-files.json`, and the
+  current-server receipt in `pulse-idle-active.json` beside it.
+
+The user unit is wanted by, ordered after, and part of the existing PulseAudio
+user service, so it reapplies policy when that service starts/restarts. It does
+not enable PulseAudio itself or lingering. Policy-helper failure does not stop
+the PulseAudio service; inspect the helper's user journal and rerun/check before
+claiming activation. A manually launched daemon outside the user service needs
+explicit operator review and is not replaced automatically.
+
+Each application rechecks the DT-owned audio card, driver, permissions, endpoint
+identity and monitor exclusion. Only the HAT's two properties change. The helper
+requires exactly one idle module and preserves its existing arguments on reload,
+so other devices retain their policy. Active HAT streams, including monitor
+consumers, are preserved by deferring a reload until applications stop. A receipt
+ties an applied policy to the actual PulseAudio process/start time, boot and
+module instance; repeated checks cannot mistake a previous server for the current
+one. No user helper is executed as root.
+
+Unowned/conflicting files and custom unit drop-ins are preserved. Owned updates
+verify hashes/modes first; file/unit failures attempt rollback and report any
+remaining temporary policy or recovery work. Check-only mode starts no unit,
+reloads no module and writes no files. Inspect state as the runtime account:
+
+```bash
+systemctl --user status fusion-hat-pulse-idle.service
+journalctl --user -u fusion-hat-pulse-idle.service -b --no-pager
+/usr/bin/python3 "$HOME/.local/libexec/fusion-hat-pulse-idle/pulse_idle.py" check
+```
+
+To remove only the owned persistent policy, exit audio applications and run:
+
+```bash
+/usr/bin/python3 "$HOME/.local/libexec/fusion-hat-pulse-idle/pulse_idle.py" remove
+systemctl --user restart pulseaudio.service
+pactl get-default-source
+pactl get-default-sink
+```
+
+Removal disables its user unit and removes only unchanged owned files. Temporary
+properties remain until the explicit PulseAudio restart recreates the devices.
+The original timeout values/hashes are retained in a private
+`pulse-idle-removed-*.json` receipt.
+Review the saved routing receipt if defaults differ afterward. Modified policy
+files require review before update/removal; no whole-home cleanup is performed.
+
+The persistent implementation has mocked software coverage. Its service-restart
+and reboot/login behavior still require operator acceptance: check the policy
+unit and selected HAT routing, complete two wake-triggered voice turns, verify
+return to wake listening, and inspect a fresh kernel-log window for matching clock
+errors. Keep physical audio results separate from a passing `--check`. Unattended
+startup before login remains unverified.
+
+### Voice Python environment
 
 Before voice imports, the existing core Python helper installs the local Fusion
 package with `--no-deps`, plus `evdev` and build tools, into the selected voice
@@ -403,6 +497,11 @@ download, live-provider call, motor/servo test or robot deployment is automatic.
    Do not change that runtime's code/configuration here. Test wake activation
    after reboot and unattended startup before login separately; neither follows
    from a successful console-started voice session.
+6. If `--hat-idle-release` is selected, verify its owned files, enabled/active user
+   unit and current-server receipt. Repeat after a deliberate PulseAudio service
+   restart, then after reboot/login. Require two functional voice turns, return
+   to wake listening, measured engagement/playback timing and a fresh kernel-log
+   clock-error count; do not infer those physical results from mocked unit tests.
 
 Existing operator evidence (not validation of this new dispatcher): manual and
 helper audio tests worked on the stated Orange Pi target. Runtime **R11**
@@ -524,11 +623,12 @@ zero matching clock errors strongly support idle hardware retention as a cause
 of the observed handoff delays on this setup. This does not establish a general
 full-duplex or hardware-rate fix, or explain earlier quiet helper recordings.
 
-**R6 is a successful session-only workaround.** Restarting PulseAudio or rebooting
-clears the temporary properties. Persistent HAT-only setup, repeat testing and
-post-reboot/login acceptance of that policy remain pending; it is not installed
-automatically by this revision. Keep the recovered rate configuration. No
-embodied-runtime, wake matching or TTS behavior was changed for this trial.
+**R6 is a successful session-only trial.** Restarting PulseAudio or rebooting
+clears those temporary properties. The later explicit `--hat-idle-release` option
+implements persistent HAT-only setup, with mocked tests; service-restart and
+post-reboot/login operator acceptance of that implementation remain pending.
+The policy is configured only when selected. Keep the recovered rate
+configuration. No embodied-runtime, wake matching or TTS behavior changed.
 
 **Unattended startup before login remains unverified.** These are
 operator-provided logs/results for 0107a9e, not hardware validation of the later
@@ -544,7 +644,7 @@ TTS behavior and motor/servo behavior are outside this change.
 
 ## Repository verification
 
-The implementation was checked on cloud Python 3.12 / x86_64: **134 unittest
+The implementation was checked on cloud Python 3.12 / x86_64: **159 unittest
 cases passed, no skips**, including the existing core/audio transaction, rollback,
 policy, permission, stream-boundary and real DTC fixture composition cases. New
 cases exercise supported/rejected identities (including the vendor alias), both
@@ -564,10 +664,16 @@ without `work/`, beneath a writable parent directory.
 Output regressions cover expected reboot pauses versus real failures, retained
 resume options, private log permissions, quiet/verbose command output, captured
 probe results, actionable child failures and visible routing recovery/warnings.
+Idle-policy cases cover native/PipeWire separation, actual-microphone identity,
+active stream/monitor protection, preserved module arguments, process-bound
+receipts, copied-helper reapplication after a simulated server restart, read-only
+checks, owned updates/removal and partial-failure rollback. The generated user
+unit also passed offline `systemd-analyze --user verify` with a fixture PulseAudio
+unit; no service was started by that check.
 Privileged and hardware boundaries are mocked; these results are not board validation.
 
 `bash -n`, ShellCheck 0.10, Python compilation and `git diff --check` passed.
-Bash syntax checks passed for executable guide examples (36 blocks; existing
+Bash syntax checks passed for executable guide examples (39 blocks; existing
 illustrative CLI/output blocks are excluded). Sphinx HTML built with the same
 four existing diagnostics as the workspace's earlier build: `_config` import
 warnings and rotary-encoder docstring indentation errors. No changed guide

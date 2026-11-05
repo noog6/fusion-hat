@@ -133,13 +133,13 @@ class ProvenanceAndUser(unittest.TestCase):
         self.assertTrue(all(a[5] in ('rev-parse', 'status') for a in calls))
 
     def test_bootstrap_revision_and_resume_are_pinned_with_options(self):
-        args = INSTALL.parser().parse_args(['--voice', '--set-audio-defaults', '--install-pulseaudio', '--headers', '/my headers'])
+        args = INSTALL.parser().parse_args(['--voice', '--set-audio-defaults', '--install-pulseaudio', '--hat-idle-release', '--headers', '/my headers'])
         args.stages = ['voice']
         with patch.dict(os.environ, {'FUSION_HAT_BOOTSTRAP_REPOSITORY': 'noog6/fusion-hat', 'FUSION_HAT_BOOTSTRAP_REVISION': 'a' * 40}):
             _, repo, revision = INSTALL.source_revision(args, runner=lambda _: 'a' * 40)
             result = INSTALL.resume(args, USER, '/home/runtime/my venv/bin/python', repo, revision)
             self.assertIn('/' + 'a' * 40 + '/install.sh', result)
-            for option in ('--voice', '--set-audio-defaults', '--install-pulseaudio', "'/my headers'", "'/home/runtime/my venv/bin/python'"):
+            for option in ('--voice', '--set-audio-defaults', '--install-pulseaudio', '--hat-idle-release', "'/my headers'", "'/home/runtime/my venv/bin/python'"):
                 self.assertIn(option, result)
             with self.assertRaisesRegex(ValueError, 'mismatch'):
                 INSTALL.source_revision(args, runner=lambda _: 'b' * 40)
@@ -400,6 +400,33 @@ class DispatchAndFailure(unittest.TestCase):
                 (pi if platform == 'orange-pi' else orange).assert_not_called()
                 self.assertFalse(invoked.call_args.args[1].exists())
                 self.assertFalse((ROOT / 'build-artifact').exists())
+
+    def test_idle_option_forwarded_only_to_orange_voice_user_command(self):
+        service = SimpleNamespace(Pending=RuntimeError, prepare_service=Mock())
+        with patch.object(INSTALL, 'detect', return_value='orange-pi'), \
+             patch.object(INSTALL, 'source_revision', return_value=('local revision', None, 'a' * 40)), \
+             patch.object(INSTALL, 'runtime_user', return_value=USER), \
+             patch.object(INSTALL.os, 'geteuid', return_value=0), patch.object(INSTALL.os, 'chown'), \
+             patch.object(INSTALL, 'selected_python', return_value='/venv/bin/python'), \
+             patch.object(INSTALL, 'orange'), patch.object(INSTALL, 'load', return_value=service), \
+             patch.object(INSTALL, 'command') as command:
+            self.assertEqual(INSTALL.main(['--voice', '--hat-idle-release']), 0)
+        self.assertIn('--hat-idle-release', command.call_args.args[0])
+        self.assertIn('runtime', command.call_args.args[0])
+
+    def test_idle_option_rejects_pi_or_missing_voice_before_any_changes(self):
+        for platform, options in (('raspberry-pi', ['--voice', '--hat-idle-release']),
+                                  ('orange-pi', ['--core', '--hat-idle-release'])):
+            with self.subTest(platform=platform), \
+                 patch.object(INSTALL, 'detect', return_value=platform), \
+                 patch.object(INSTALL, 'source_revision', return_value=('local revision', None, 'a' * 40)), \
+                 patch.object(INSTALL, 'runtime_user', return_value=USER), \
+                 patch.object(INSTALL.os, 'geteuid', return_value=0), \
+                 patch.object(INSTALL, 'selected_python') as selected, \
+                 patch.object(INSTALL, 'command') as command, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(INSTALL.main(options), 1)
+            selected.assert_not_called()
+            command.assert_not_called()
 
     def test_reboot_pause_reports_exact_resume_without_failure_warning_or_voice(self):
         output, errors = io.StringIO(), io.StringIO()

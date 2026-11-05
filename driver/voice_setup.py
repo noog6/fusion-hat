@@ -2,6 +2,7 @@
 """Non-streaming voice dependency, user service and explicit routing setup."""
 import argparse
 import datetime
+import importlib.util
 import json
 from importlib import metadata
 import os
@@ -260,21 +261,33 @@ def install_python(platform, runner=run):
     runner([sys.executable, '-m', 'pip', 'install', 'packaging', VOICE_REQUIREMENT])
 
 
+def configure_idle_policy(check):
+    spec = importlib.util.spec_from_file_location('fusion_user_idle_policy', Path(__file__).with_name('pulse_idle.py'))
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    policy.configure(check=check)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--platform', choices=('orange-pi', 'raspberry-pi'), required=True)
     p.add_argument('--check', action='store_true')
     p.add_argument('--hardware-check', action='store_true')
     p.add_argument('--set-audio-defaults', action='store_true')
+    p.add_argument('--hat-idle-release', action='store_true')
     args = p.parse_args()
     if os.geteuid() == 0:
         p.exit(1, 'Run voice/audio checks as the non-root runtime user in the selected venv/session.\n')
     try:
+        if args.hat_idle_release and args.platform != 'orange-pi':
+            raise RuntimeError('--hat-idle-release is limited to the verified Orange Pi/native PulseAudio path.')
         number, card_id = hardware_card(args.platform)
         if args.hardware_check:
             return 0
         if sys.prefix == sys.base_prefix:
             raise RuntimeError('Voice setup requires an existing selected venv.')
+        if args.hat_idle_release:
+            configure_idle_policy(args.check)
         if not args.check:
             install_python(args.platform)
             # Record exactly what the resolver installed, including transitive

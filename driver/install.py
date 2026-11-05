@@ -179,6 +179,7 @@ def parser():
     p.add_argument('--ref', help='bootstrap branch/tag/SHA; rejected in a local checkout')
     p.add_argument('--install-pulseaudio', action='store_true', help='allow PulseAudio packages only if no other stack is present')
     p.add_argument('--set-audio-defaults', action='store_true', help='save prior routing and explicitly select verified HAT source/sink')
+    p.add_argument('--hat-idle-release', action='store_true', help='with Orange Pi --voice: persist HAT-only immediate idle release for native PulseAudio 17')
     p.add_argument('--plain-text', action='store_true', help='legacy option; output is always plain text')
     p.add_argument('--skip-test', action='store_true', help='legacy option; no automatic stream tests are ever run')
     p.add_argument('--test', action='store_true', help='legacy option; print operator test instructions, without playing/recording')
@@ -207,7 +208,7 @@ def resume(args, user, python, repo, revision):
     if python:
         options += ['--python', python]
     options += ['--headers', args.headers]
-    for flag in ('check', 'install_pulseaudio', 'set_audio_defaults', 'plain_text', 'skip_test', 'test', 'verbose'):
+    for flag in ('check', 'install_pulseaudio', 'set_audio_defaults', 'hat_idle_release', 'plain_text', 'skip_test', 'test', 'verbose'):
         if getattr(args, flag):
             options.append('--' + flag.replace('_', '-'))
     if repo:
@@ -520,6 +521,8 @@ def main(argv=None):
             raise ValueError('--install-pulseaudio requires --voice.')
         if args.set_audio_defaults and 'voice' not in args.stages:
             raise ValueError('--set-audio-defaults requires --voice (routing is separate from hardware setup).')
+        if args.hat_idle_release and ('voice' not in args.stages or platform != 'orange-pi'):
+            raise ValueError('--hat-idle-release requires --voice on the verified Orange Pi platform.')
         output = OUTPUT = InstallOutput(trusted_temporary_root(), verbose=args.verbose)
         report('Diagnostic log (root only; save before reboot if needed): ' + str(output.path))
         output.write('Source: ' + label + '\nDetected evidence: ' + json.dumps(evidence) + '\n')
@@ -545,6 +548,8 @@ def main(argv=None):
                         options.append('--check')
                     if args.set_audio_defaults:
                         options.append('--set-audio-defaults')
+                    if args.hat_idle_release:
+                        options.append('--hat-idle-release')
                     command(user_command(user, [python, user_source / 'driver/voice_setup.py', *options], session=True))
                     report('Voice: required imports, PortAudio enumeration, user service and HAT default routing passed.')
         report('COMPLETE: selected files are installed and non-actuating software checks passed.')

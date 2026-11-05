@@ -57,7 +57,7 @@ class PrivilegeStaging(unittest.TestCase):
             with INSTALL.staging(other_user) as (privileged, user_source):
                 self.assertNotEqual(privileged.parent, user_source.parent)
                 self.assertEqual(privileged.parent.stat().st_mode & 0o777, 0o700)
-                privileged_files = ['driver/Makefile', 'driver/voice_setup.py',
+                privileged_files = ['driver/Makefile', 'driver/voice_setup.py', 'driver/pulse_idle.py',
                                     'driver/build-module.sh', 'fusion_hat/scripts/setup_fusion_hat_audio.sh']
                 for name in privileged_files:
                     original = (privileged / name).read_bytes()
