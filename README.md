@@ -1,6 +1,6 @@
 # Fusion Hat
 
-Fusion Hat Python library for Raspberry Pi.
+Fusion Hat Python library for Raspberry Pi and Orange Pi.
 
 Quick Links:
 
