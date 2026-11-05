@@ -303,11 +303,11 @@ Review the saved routing receipt if defaults differ afterward. Modified policy
 files require review before update/removal; no whole-home cleanup is performed.
 
 The operator completed persistent installation and current-server checks on
-revision **41d7050**, as recorded below. Its service-restart and reboot/login
-behavior still require operator acceptance: check the policy
-unit and selected HAT routing, complete two wake-triggered voice turns, verify
-return to wake listening, and inspect a fresh kernel-log window for matching clock
-errors. Keep physical audio results separate from a passing `--check`. Unattended
+revision **41d7050**, then reported persistence after reboot. R8 below confirms
+working wake/voice with low playback overhead after reboot/login and manual
+runtime startup. A separate service-restart trial, current-boot policy/receipt
+output and a fresh matching-clock-error count still need recorded results.
+Keep physical audio results separate from a passing `--check`. Unattended
 startup before login remains unverified.
 
 ### Voice Python environment
@@ -635,16 +635,36 @@ card identity/non-root permissions, required voice imports and PortAudio
 enumeration also passed. Existing defaults already selected the verified HAT
 microphone and speaker. Whole-venv dependency diagnostics remained outside the
 verified core/voice profile. This was a non-actuating installation/check run:
-it played and recorded no audio. Service-restart and post-reboot/login operator
-acceptance of the persistent implementation remain pending.
+it played and recorded no audio.
 The policy is configured only when selected. Keep the recovered rate
 configuration. No embodied-runtime, wake matching or TTS behavior changed.
 
+After reboot and SSH login, the operator reported that the changes persisted
+and supplied **R8**. The transcript shows manual runtime startup without manual
+audio-service, property or routing commands. R8 detected **"opie"**, transcribed
+two turns, completed both response playback calls, closed at `max_turns` and
+resumed wake listening. The operator then exited: exit code 0, zero reported
+voice/provider/runtime failures and no remaining non-daemon threads.
+
+| R8 measurement after reboot/login | Observed value |
+| --- | --- |
+| Engagement cue elapsed | 314 ms |
+| Turn 1 playback / reported clip | 3,048 / 2,972 ms (76 ms overhead) |
+| Turn 2 playback / reported clip | 3,546 / 3,436 ms (110 ms overhead) |
+| Turn 1 / 2 synthesis elapsed | 8,745 / 9,078 ms |
+
+This supports the reported post-reboot persistence and continued low playback
+overhead on this target. Synthesis remained slow in R8; the logs separate that
+stage from playback but do not isolate its cause. R8's transcript contains no
+current-boot policy/receipt output or kernel-log count, so zero matching clock
+errors after reboot are **not yet verified**. A standalone PulseAudio
+service-restart trial also has no recorded operator result. A successful "opie"
+detection does not establish recognition consistency.
+
 **Unattended startup before login remains unverified.** These are
 operator-provided runtime logs/results for 0107a9e, plus the later 41d7050
-installation/software-check result; they do not validate persistent policy
-reapplication after a service restart or reboot. This fresh-image installation
-also included the package
+installation/software-check result and subsequent R8 reboot/login trial.
+This fresh-image installation also included the package
 alignment and manually reviewed header permissions above; it does not establish
 an untouched-image one-command installation.
 
