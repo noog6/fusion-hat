@@ -463,6 +463,18 @@ R2 synthesis took 468/475 ms; reported audio lengths were 2,554/3,111 ms and
 playback elapsed times were 5,217/5,504 ms. Playback still exceeded clip duration
 by about 2.4–2.7 seconds; the cause and resolution remain outside this change.
 
+**Open audio validation issue:** subsequent operator kernel logs contained
+repeated `sunxi_i2s_clk_open()` rejections when an existing 48 kHz playback
+clock conflicted with a new 44.1 kHz request, or existing 44.1 kHz capture
+conflicted with a new 48 kHz request. ALSA reported failed hardware-parameter
+setup. An idle PulseAudio snapshot showed the HAT sink at 48 kHz and its
+microphone source at 44.1 kHz; both were suspended and hardware PCMs were closed.
+After a trial per-user 48 kHz default/alternate-rate configuration was suggested,
+another operator log still contained both conflict directions. Effective server
+settings and live PCM ownership/routing still need verification. No rate fix is
+validated or automatically installed. R1/R2 establish functional voice use, not
+error-free audio negotiation; a causal link to playback latency is unproven.
+
 **Unattended startup before login remains unverified.** These are
 operator-provided logs/results for 0107a9e, not hardware validation of the later
 console/logging changes. This fresh-image installation also included the package
