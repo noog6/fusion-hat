@@ -409,9 +409,11 @@ helper audio tests worked on the stated Orange Pi target. Runtime **R11**
 completed two spoken turns with clear audible output. **R13** detected alias
 “oh be”, completed two voice turns and resumed wake listening. After reboot
 and SSH login, **R15** completed another console-started two-turn session
-without manual service startup or routing commands. Wake activation after reboot
-and unattended startup before login remain **unverified**. “Opie” recognition is
-inconsistent; several-second playback overhead remains unresolved. Earlier
+without manual service startup or routing commands. Those earlier sessions did
+not establish wake activation after reboot; the later fresh-image R2 below does
+for an operator-started session after login. Unattended startup before login
+remains **unverified**. “Opie” recognition has been inconsistent;
+several-second playback overhead remains unresolved. Earlier
 bounded helper recordings/replays were quiet; later runtime speech was reported
 loud and clear. No single unmeasured change is asserted as the cause.
 
@@ -446,13 +448,26 @@ and 4,540 ms of playback; the second reported 9,051 ms synthesis, 3,204 ms of au
 and 3,296 ms playback. These observations do not establish the cause of latency
 or resolution of the earlier playback-overhead issue.
 
-**Fresh-image reboot/login persistence after completing voice setup remains
-pending**: repeat wake activation and two spoken turns without manually starting
-the audio service or changing routing. Unattended startup before login remains
-unverified. These are operator-provided logs/results for 0107a9e, not hardware
-validation of the later console/logging changes. This fresh-image installation
-also included the package alignment and manually reviewed header permissions
-above; it does not establish an untouched-image one-command installation.
+The operator then exited R1 cleanly: exit code 0, two voice turns, zero voice
+failures, zero provider failures/runtime errors and no remaining non-daemon
+threads. After `sudo reboot` and SSH login, the operator started the same command
+for **R2**, with no manual audio-service startup or routing commands shown.
+R2 detected **“opie”**, transcribed two requests, completed both response playback
+calls, closed at the two-turn limit, resumed wake listening, and remained
+running. The status report showed uptime 1 minute 55 seconds, corroborating the
+reboot. **Wake activation and bidirectional voice after reboot/login are now
+observed on this fresh installation**, with the runtime launched manually.
+This single “opie” detection does not establish consistent recognition.
+
+R2 synthesis took 468/475 ms; reported audio lengths were 2,554/3,111 ms and
+playback elapsed times were 5,217/5,504 ms. Playback still exceeded clip duration
+by about 2.4–2.7 seconds; the cause and resolution remain outside this change.
+
+**Unattended startup before login remains unverified.** These are
+operator-provided logs/results for 0107a9e, not hardware validation of the later
+console/logging changes. This fresh-image installation also included the package
+alignment and manually reviewed header permissions above; it does not establish
+an untouched-image one-command installation.
 
 Cloud tests mock privileged operations and hardware/session boundaries. Real
 DTC fixture composition checks preserve MCU/HDMI/PB4, but do not validate the
