@@ -31,7 +31,7 @@ for ((i=0; i<${#args[@]}; i++)); do
         --help|-h)
             echo 'Standalone bootstrap: --repo OWNER/REPO --ref BRANCH|TAG|SHA (defaults: noog6/fusion-hat v1).'
             echo 'Stages: --core --audio --voice; selection: --runtime-user USER --venv /path or --python /venv/bin/python.'
-            echo 'Also: --check --platform auto|raspberry-pi|orange-pi --headers PATH --install-pulseaudio --set-audio-defaults.'
+            echo 'Also: --check --verbose --platform auto|raspberry-pi|orange-pi --headers PATH --install-pulseaudio --set-audio-defaults.'
             echo 'See driver/unified-install.md in the selected repository/ref for all options.'
             exit 0 ;;
     esac

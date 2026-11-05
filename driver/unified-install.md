@@ -16,8 +16,9 @@ physical playback/capture are separate operator acceptance results.
 Debian ancestry does not establish Raspberry Pi OS: 64-bit Pi OS needs its
 `/etc/rpi-issue` origin or explicit Pi OS name in addition to board/kernel data.
 Conflicting, missing or unsupported evidence fails closed, including when
-`--platform` is explicit. Detection reports OS/Armbian metadata, DT model,
-compatible and board properties, architecture and kernel.
+`--platform` is explicit. Detection prints a board/OS/image/architecture/kernel
+summary. Full OS/Armbian metadata and DT properties go into the diagnostic log
+(or the error output if validation fails before a log is created).
 
 The inspected vendor Zero 3W source at
 [`2ac08e8`](https://github.com/orangepi-xunlong/linux-orangepi/blob/2ac08e8c7cdc28abbdc5c9a9dd812f887ae9c79f/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-zero3w.dts)
@@ -56,8 +57,9 @@ symlink hop and every directory used to reach them must be root-owned, with no
 group/world writable directories or regular files. Resolve a failure with an
 administrator-reviewed header installation, not by giving the runtime user
 access to privileged builds.
-The installer reports Git HEAD, local modification status, and the snapshot's
-SHA256. Keep that output for review.
+The installer reports Git HEAD and local modification status. The private
+diagnostic log also records the snapshot's SHA256 and full detection evidence.
+Keep that log for review.
 Existing owned drivers are retained on rerun; a new source snapshot does not
 silently upgrade an already installed kernel module. Replacing an Orange Pi
 installation requires its documented uninstall/reboot procedure.
@@ -120,6 +122,7 @@ the listed stages; add `--voice` explicitly if desired.
 | `--install-pulseaudio` | With `--voice`, permit PulseAudio + utilities only when no existing audio stack is detected. Not a general Armbian requirement. |
 | `--set-audio-defaults` | With `--voice`, explicitly select the verified HAT microphone/source and sink, saving previous routing first. Without it, different defaults remain unchanged and voice routing is reported incomplete. |
 | `--platform auto\|raspberry-pi\|orange-pi` | Optional selection; still must pass detection and compatibility checks. |
+| `--verbose` | Also show detailed commands, package/build output and device enumeration on the console. These details are always saved in a private diagnostic log. Resume commands retain this option. |
 | `--plain-text`, `--skip-test`, `--test` | Accepted legacy arguments. Output is plain text and stream tests are always operator actions. `--test` prints the acceptance-guide location; it does not play/record. |
 
 Fresh Orange Pi flow:
@@ -133,9 +136,36 @@ Fresh Orange Pi flow:
    binding and both policy flags. Audio preflight validates the active core,
    pin ownership, speaker-off state, DAIs and offline DT composition. It installs
    only owned audio files/token. Inactive audio requires another explicit reboot.
-3. After reboot/login, rerun again. Identical hardware stages are no-ops; the
+3. After reboot/login, rerun again. Identical hardware files are retained; the
    helper checks the DT-owned audio card and scoped non-root access without
-   opening a PCM. Optional voice setup can now proceed.
+   opening a PCM. Python packaging is checked/reinstalled by the existing helper
+   on installation runs. Optional voice setup can now proceed.
+
+These are **two separate reboot boundaries** on a fresh Orange Pi: first core,
+then audio. Repeating the command before the requested reboot safely detects
+the same pending activation; it cannot advance voice setup. An expected pause
+prints, for example:
+
+```text
+[1/3] Core: preparing files and Python environment
+Core: files present; active binding and both MCU policy checks passed.
+[2/3] Audio: preparing audio hardware configuration
+REBOOT REQUIRED: Audio files installed; reboot required, then rerun this command after login.
+Waiting for activation before continuing: voice.
+This is an expected pause. No reboot was performed.
+Next: run sudo reboot, log in again, then rerun:
+<complete command with the same revision, user, Python and selected options>
+```
+
+Normal output shows stages, activation/check results, routing identity/recovery
+and any whole-venv dependency warning. Compiler, pip and individual command
+details go to the printed root-only `/tmp/fusion-hat-install-*.log` (mode 600).
+Use `sudo cat /tmp/fusion-hat-install-PRINTED_NAME.log` to inspect it, or
+`sudo tail -f /tmp/fusion-hat-install-PRINTED_NAME.log` in another session during
+a long build. Add `--verbose` to mirror details on the console. The log is retained
+on exit; `/tmp` may be cleared on reboot, so save it beforehand if needed. Errors
+include actionable details and the complete resume command. Expected reboot
+pauses do not print transaction-failure/rollback warnings.
 
 Pi driver installation uses `make ... BOOT_ONLY=1 install` to defer live module
 load/unload until the operator's reboot. The Makefile's standalone defaults and
@@ -247,6 +277,40 @@ restart the intended application explicitly after reviewing routing.
 
 ## Troubleshooting and recovery
 
+- **Fresh image version:** the operator's reflash started with BSP/image/DTB/
+  bootloader packages at 26.8.1, while separately installing 26.8.3 headers did
+  not upgrade those packages. The validated baseline needs
+  `armbian-bsp-cli-orangepizero3w-vendor`, `linux-image-vendor-sun60iw2`,
+  `linux-dtb-vendor-sun60iw2`, `linux-headers-vendor-sun60iw2` and
+  `linux-u-boot-orangepizero3w-vendor` at **26.8.3**, followed by an explicit
+  reboot. Review `apt-cache policy` and an `apt-get -s install` simulation before
+  selecting that cohort. A blanket upgrade can move outside the validated
+  kernel/image. `/etc/os-release` may separately report Armbian 26.8.14;
+  `/etc/armbian-release`, board, boot selection and kernel are still checked.
+- **Writable generated vendor headers:** on the fresh 26.8.3 header package,
+  five generated regular files were root:root mode 664. The root-build input
+  guard correctly rejected them. The operator verified ownership and removed
+  only group-write permission on these files (no automatic permission rewrite
+  or validator bypass):
+
+  ```bash
+  header_tree=/usr/src/linux-headers-6.6.98-vendor-sun60iw2
+  sudo stat -c '%F | mode=%a | owner=%U:%G | %n' \
+    "$header_tree/include/config/"{kernel.release,auto.conf,auto.conf.cmd} \
+    "$header_tree/include/generated/"{autoconf.h,rustc_cfg}
+  # Only after confirming these are root:root regular files with mode 664:
+  sudo chmod g-w -- \
+    "$header_tree/include/config/"{kernel.release,auto.conf,auto.conf.cmd} \
+    "$header_tree/include/generated/"{autoconf.h,rustc_cfg}
+  sudo find "$header_tree" -xdev \
+    \( ! -uid 0 -o \( ! -type l -perm /022 \) \) \
+    -printf '%y %m %u:%g %p\n'
+  ```
+
+  That final audit was empty on the operator's image; the installer's full
+  symlink-chain/ancestor checks still run. Investigate any other findings rather
+  than applying recursive chmod/chown or weakening the trust checks. Package
+  reinstall/header preparation may recreate generated files and need review.
 - **Unsupported/conflicting platform:** save the printed detection evidence;
   compare `/etc/os-release`, `/etc/armbian-release`, DT root properties,
   `uname -m/-r` and boot DTB selection. Explicit platform flags cannot force it.
@@ -351,6 +415,21 @@ inconsistent; several-second playback overhead remains unresolved. Earlier
 bounded helper recordings/replays were quiet; later runtime speech was reported
 loud and clear. No single unmeasured change is asserted as the cause.
 
+Subsequent operator checks of unified revision **0107a9e** on the existing
+installation passed core/audio and voice `--check`, followed by a successful
+embodied-runtime wake trigger and voice in both directions. The operator also
+reported audio working after reboot. This does not establish wake activation
+after reboot or unattended startup before login.
+
+On the fresh-image attempt, after the package/header prerequisites above were
+resolved, the operator built and installed core, rebooted, and passed the active
+binding and both MCU policy checks. Audio files then installed successfully;
+an immediate rerun recognized the identical files and correctly requested its
+own reboot. At this point **fresh-image audio activation, voice dependency/service
+setup, physical conversation and post-reboot verification remain pending**.
+These are operator-reported results for 0107a9e, not hardware validation of the
+later console/logging changes.
+
 Cloud tests mock privileged operations and hardware/session boundaries. Real
 DTC fixture composition checks preserve MCU/HDMI/PB4, but do not validate the
 installed target DTB or hardware. Raspberry Pi and new unified Orange Pi
@@ -359,7 +438,7 @@ TTS behavior and motor/servo behavior are outside this change.
 
 ## Repository verification
 
-The implementation was checked on cloud Python 3.12 / x86_64: **127 unittest
+The implementation was checked on cloud Python 3.12 / x86_64: **134 unittest
 cases passed, no skips**, including the existing core/audio transaction, rollback,
 policy, permission, stream-boundary and real DTC fixture composition cases. New
 cases exercise supported/rejected identities (including the vendor alias), both
@@ -376,10 +455,13 @@ and runtime-owned hops, including the replaceable-Makefile layout, while
 accepting trusted relative/absolute chains and preserving symlink-before-`..`
 semantics. The complete suite also passes from a clean tracked-file export
 without `work/`, beneath a writable parent directory.
+Output regressions cover expected reboot pauses versus real failures, retained
+resume options, private log permissions, quiet/verbose command output, captured
+probe results, actionable child failures and visible routing recovery/warnings.
 Privileged and hardware boundaries are mocked; these results are not board validation.
 
 `bash -n`, ShellCheck 0.10, Python compilation and `git diff --check` passed.
-Bash syntax checks passed for executable guide examples (35 blocks; existing
+Bash syntax checks passed for executable guide examples (36 blocks; existing
 illustrative CLI/output blocks are excluded). Sphinx HTML built with the same
 four existing diagnostics as the workspace's earlier build: `_config` import
 warnings and rotary-encoder docstring indentation errors. No changed guide

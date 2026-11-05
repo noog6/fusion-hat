@@ -368,7 +368,10 @@ class AudioServicesAndRouting(unittest.TestCase):
 class DispatchAndFailure(unittest.TestCase):
     def setUp(self):
         # The cloud /tmp mount has a synthetic owner; privileged metadata is mocked.
-        parent = patch.object(INSTALL, 'trusted_temporary_root', return_value='/tmp')
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.temporary = Path(temporary.name)
+        parent = patch.object(INSTALL, 'trusted_temporary_root', return_value=temporary.name)
         parent.start()
         self.addCleanup(parent.stop)
 
@@ -398,21 +401,69 @@ class DispatchAndFailure(unittest.TestCase):
                 self.assertFalse(invoked.call_args.args[1].exists())
                 self.assertFalse((ROOT / 'build-artifact').exists())
 
-    def test_failure_reports_exact_resume_and_does_not_continue_voice(self):
-        output = io.StringIO()
+    def test_reboot_pause_reports_exact_resume_without_failure_warning_or_voice(self):
+        output, errors = io.StringIO(), io.StringIO()
         with patch.object(INSTALL, 'detect', return_value='orange-pi'), \
              patch.object(INSTALL, 'source_revision', return_value=('local revision', None, 'a' * 40)), \
              patch.object(INSTALL, 'runtime_user', return_value=USER), \
              patch.object(INSTALL.os, 'geteuid', return_value=0), patch.object(INSTALL.os, 'chown'), \
              patch.object(INSTALL, 'selected_python', return_value='/home/runtime/venv/bin/python'), \
-             patch.object(INSTALL, 'orange', side_effect=INSTALL.Incomplete('Core files installed; reboot required')), \
-             patch.object(INSTALL, 'command') as cmd, contextlib.redirect_stderr(output):
+             patch.object(INSTALL, 'orange', side_effect=INSTALL.RebootRequired('core')), \
+             patch.object(INSTALL, 'command') as cmd, contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
             self.assertEqual(INSTALL.main(['--core', '--audio', '--voice', '--set-audio-defaults']), 3)
         cmd.assert_not_called()
         self.assertIn('reboot required', output.getvalue())
         for flag in ('--core', '--audio', '--voice', '--set-audio-defaults', '--runtime-user runtime', '--python /home/runtime/venv/bin/python'):
             self.assertIn(flag, output.getvalue())
-        self.assertIn('manifest', output.getvalue())
+        self.assertIn('REBOOT REQUIRED', output.getvalue())
+        self.assertIn('Waiting for activation before continuing: audio, voice.', output.getvalue())
+        self.assertIn('sudo reboot', output.getvalue())
+        self.assertNotIn('manifest', output.getvalue())
+        self.assertNotIn('failed', output.getvalue().lower())
+        self.assertEqual(errors.getvalue(), '')
+        self.assertIsNone(INSTALL.OUTPUT)
+
+    def test_failure_retains_diagnostics_and_resume_without_claiming_reboot(self):
+        errors = io.StringIO()
+        with patch.object(INSTALL, 'detect', return_value='orange-pi'), \
+             patch.object(INSTALL, 'source_revision', return_value=('local revision', None, 'a' * 40)), \
+             patch.object(INSTALL, 'runtime_user', return_value=USER), \
+             patch.object(INSTALL.os, 'geteuid', return_value=0), patch.object(INSTALL.os, 'chown'), \
+             patch.object(INSTALL, 'selected_python', return_value='/venv/bin/python'), \
+             patch.object(INSTALL, 'orange', side_effect=ValueError('untrusted header input')), \
+             contextlib.redirect_stderr(errors):
+            self.assertEqual(INSTALL.main(['--core', '--audio', '--verbose']), 1)
+        self.assertIn('INSTALLATION FAILED: untrusted header input', errors.getvalue())
+        self.assertIn('manifest/rollback', errors.getvalue())
+        self.assertIn('--verbose', errors.getvalue())
+        self.assertNotIn('sudo reboot', errors.getvalue())
+        log, = self.temporary.glob('*.log')
+        self.assertIn('ValueError: untrusted header input', log.read_text())
+
+    def test_audio_pause_preserves_core_progress_and_waits_for_voice(self):
+        output, errors = io.StringIO(), io.StringIO()
+        def audio_pending(*args, **kwargs):
+            INSTALL.report('Core: files present; active binding and both MCU policy checks passed.')
+            print('noisy package diagnostics')
+            raise INSTALL.RebootRequired('audio')
+        with patch.object(INSTALL, 'detect', return_value='orange-pi'), \
+             patch.object(INSTALL, 'source_revision', return_value=('local revision', None, 'a' * 40)), \
+             patch.object(INSTALL, 'runtime_user', return_value=USER), \
+             patch.object(INSTALL.os, 'geteuid', return_value=0), patch.object(INSTALL.os, 'chown'), \
+             patch.object(INSTALL, 'selected_python', return_value='/venv/bin/python'), \
+             patch.object(INSTALL, 'orange', side_effect=audio_pending), \
+             patch.object(INSTALL, 'load') as voice, \
+             contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            self.assertEqual(INSTALL.main(['--core', '--audio', '--voice']), 3)
+        self.assertIn('Core: files present; active binding', output.getvalue())
+        self.assertIn('Audio files installed; reboot required', output.getvalue())
+        self.assertIn('Waiting for activation before continuing: voice.', output.getvalue())
+        self.assertNotIn('noisy package diagnostics', output.getvalue())
+        self.assertNotIn('Source snapshot SHA256:', output.getvalue())
+        log, = self.temporary.glob('*.log')
+        self.assertIn('noisy package diagnostics', log.read_text())
+        self.assertEqual(errors.getvalue(), '')
+        voice.assert_not_called()
 
 
 class Bootstrap(unittest.TestCase):

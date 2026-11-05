@@ -29,13 +29,36 @@ def load(name, path):
 
 
 CORE = load('fusion_core_installer', HERE / 'orange-pi-zero3w-install.py')
+InstallOutput = load('fusion_install_output', HERE / 'install_output.py').InstallOutput
+OUTPUT = None
 
 
 class Incomplete(RuntimeError):
     """Files/prerequisites may be ready, but activation or user action is pending."""
 
 
+class RebootRequired(Incomplete):
+    """An expected activation boundary, not an installation failure."""
+    def __init__(self, stage, message=None):
+        self.stage = stage
+        super().__init__(message or f'{stage.capitalize()} files installed; reboot required, then rerun this command after login.')
+
+
+def report(text):
+    if OUTPUT:
+        OUTPUT.report(text)
+    else:
+        print(text, flush=True)
+
+
+def progress(args, stage, description):
+    if stage in args.stages:
+        report(f'[{args.stages.index(stage) + 1}/{len(args.stages)}] {stage.capitalize()}: {description}')
+
+
 def command(args, capture=False):
+    if OUTPUT:
+        return OUTPUT.command(args, capture)
     print('+ ' + shlex.join([str(a) for a in args]), flush=True)
     result = subprocess.run([str(a) for a in args], check=True, text=True,
                             stdout=subprocess.PIPE if capture else None)
@@ -46,7 +69,7 @@ def read(path):
     return path.read_text().strip().strip('\0') if path.exists() else ''
 
 
-def detect(root=Path('/'), runner=CORE.run, selected='auto'):
+def detect(root=Path('/'), runner=CORE.run, selected='auto', evidence=None):
     path = lambda p: root / p.lstrip('/')
     operating_system = CORE.settings(read(path('/etc/os-release')))
     arm = CORE.settings(read(path('/etc/armbian-release')))
@@ -54,8 +77,12 @@ def detect(root=Path('/'), runner=CORE.run, selected='auto'):
     compatible = read(path('/sys/firmware/devicetree/base/compatible')).split('\0')
     board = read(path('/sys/firmware/devicetree/base/board'))
     arch, kernel = runner(['uname', '-m']), runner(['uname', '-r'])
-    print('Detected: ' + json.dumps(dict(os=operating_system, armbian=arm, model=model,
-                                        compatible=compatible, board=board, architecture=arch, kernel=kernel)), flush=True)
+    detected = dict(os=operating_system, armbian=arm, model=model,
+                    compatible=compatible, board=board, architecture=arch, kernel=kernel)
+    if evidence is not None:
+        evidence.update(detected)
+    print(f'Detected: {model or "unknown board"}; {operating_system.get("PRETTY_NAME", "unknown OS")}; '
+          f'Armbian image {arm.get("VERSION", "n/a")}; {arch}; kernel {kernel}', flush=True)
     pi_board = any(c.startswith('raspberrypi,') for c in compatible)
     orange_named = 'xunlong,orangepi-zero3w' in compatible and bool(re.search(r'Orange\s*Pi\s+Zero\s*3W', model, re.I))
     # The inspected Zero 3W vendor DTS inherits a generic SoC model and a
@@ -134,7 +161,7 @@ def selected_python(args, user, platform, runner=command):
         raise ValueError('The Orange Pi Python path is validated only with Python 3.14.4.')
     runner(user_command(user, [value, '-c',
            'import os,sys; assert os.stat(sys.prefix).st_uid == os.getuid() and os.access(sys.prefix, os.W_OK), "venv must be owned and writable by runtime user"']))
-    print(f'Runtime user: {user.pw_name}; Python: {value}; environment: {info}')
+    print('Python environment details: ' + json.dumps(info))
     return value
 
 
@@ -155,6 +182,7 @@ def parser():
     p.add_argument('--plain-text', action='store_true', help='legacy option; output is always plain text')
     p.add_argument('--skip-test', action='store_true', help='legacy option; no automatic stream tests are ever run')
     p.add_argument('--test', action='store_true', help='legacy option; print operator test instructions, without playing/recording')
+    p.add_argument('--verbose', action='store_true', help='also print diagnostic commands and package/build output (always saved in a private log)')
     return p
 
 
@@ -179,7 +207,7 @@ def resume(args, user, python, repo, revision):
     if python:
         options += ['--python', python]
     options += ['--headers', args.headers]
-    for flag in ('check', 'install_pulseaudio', 'set_audio_defaults', 'plain_text', 'skip_test', 'test'):
+    for flag in ('check', 'install_pulseaudio', 'set_audio_defaults', 'plain_text', 'skip_test', 'test', 'verbose'):
         if getattr(args, flag):
             options.append('--' + flag.replace('_', '-'))
     if repo:
@@ -226,6 +254,7 @@ def orange(args, source, user, python, runner=command, user_source=None):
     # Always validate existing ownership, even for an audio-only/voice-only run.
     state = verify_owned(core, user, core_module.TOKEN)
     if 'core' in args.stages:
+        progress(args, 'core', 'checking files, Python environment and activation' if args.check else 'preparing files and Python environment')
         config, dtb, state, _ = core.preflight(args.headers, user.pw_name)
         if args.check:
             core.overlay(config, dtb)
@@ -250,9 +279,10 @@ def orange(args, source, user, python, runner=command, user_source=None):
     if not state:
         raise Incomplete('Core files are absent. Run with --core first; matching prepared vendor headers and i2c0 are prerequisites (see core guide).')
     if not active_core():
-        raise Incomplete('Core files installed; reboot required, then rerun this command after login. No audio preflight was bypassed.')
-    print('Core binding and both MCU policy flags passed.')
+        raise RebootRequired('core')
+    report('Core: files present; active binding and both MCU policy checks passed.')
     if 'audio' in args.stages:
+        progress(args, 'audio', 'checking files, card and permissions' if args.check else 'preparing audio hardware configuration')
         config, dtb, audio_state = audio.preflight(user.pw_name)
         files = audio.artifacts(config, dtb)
         if not args.check:
@@ -261,9 +291,9 @@ def orange(args, source, user, python, runner=command, user_source=None):
         if not verify_owned(audio, user, audio_module.TOKEN):
             raise Incomplete('Audio files are absent. Run with --audio after core activation.')
         if not Path('/sys/firmware/devicetree/base/fusion-hat-audio').exists():
-            raise Incomplete('Audio files installed; reboot required, then rerun this command after login.')
+            raise RebootRequired('audio')
         runner(user_command(user, [python or '/usr/bin/python3', user_source / 'examples/orange_pi_zero3w_audio.py', 'check']))
-        print('Audio card identity and non-root permissions passed; no PCM stream opened.')
+        report('Audio: files present; active card identity and non-root permissions passed. No stream opened.')
 
 
 def raspberry(args, source, user, python, runner=command, root=Path('/'), user_source=None):
@@ -280,6 +310,7 @@ def raspberry(args, source, user, python, runner=command, root=Path('/'), user_s
     print(f'Pi driver file: {installed or "absent"}; boot configuration: {config}')
     if args.check and not installed:
         raise Incomplete('Pi driver files are absent. Run --core without --check first.')
+    progress(args, 'core', 'checking driver and Python' if args.check else 'preparing driver and Python')
     if not args.check and 'core' in args.stages:
         packages = ['git', 'python3', 'python3-pip', 'i2c-tools', 'espeak', 'libsdl2-dev', 'libsdl2-mixer-dev',
                     'portaudio19-dev', 'sox', 'libsox-fmt-mp3', 'libttspico-utils', 'dkms']
@@ -332,10 +363,14 @@ def raspberry(args, source, user, python, runner=command, root=Path('/'), user_s
         register = str(Path(python).parent / 'register-python-argcomplete') if python else 'register-python-argcomplete'
         runner(user_command(user, [executable, '-c', completion_script, register]))
     if not path('/sys/module/fusion_hat').exists() or not path('/sys/class/fusion_hat/fusion_hat/firmware_version').exists():
-        raise Incomplete('Pi driver is not active. Review the installed files and dmesg; reboot explicitly, then rerun this command.')
+        if installed or 'core' in args.stages and not args.check:
+            raise RebootRequired('core', 'Pi driver is not active; reboot explicitly, then rerun this command. If it remains inactive, inspect dmesg and the Pi guide.')
+        raise Incomplete('Pi driver is not active. Install/check --core first, then review dmesg and reboot explicitly.')
     if {'core', 'audio'}.intersection(args.stages):
         runner(user_command(user, [python or '/usr/bin/python3', '-c', 'from fusion_hat.battery import Battery; print("Core import passed")']))
+        report('Core: installed Pi driver is active; Python import passed.')
     if 'audio' in args.stages:
+        progress(args, 'audio', 'checking card and permissions' if args.check else 'preparing audio hardware configuration')
         if not args.check:
             audio_args = ['bash', source / 'fusion_hat/scripts/setup_fusion_hat_audio.sh', '--skip-test', '--non-actuating', '--runtime-user', user.pw_name, '--user-source', str(user_source)]
             if not args.set_audio_defaults:
@@ -343,6 +378,7 @@ def raspberry(args, source, user, python, runner=command, root=Path('/'), user_s
             runner(audio_args)
         # Verified card identity and permissions are also used by voice checks.
         runner(user_command(user, ['/usr/bin/python3', user_source / 'driver/voice_setup.py', '--hardware-check', '--platform', 'raspberry-pi']))
+        report('Audio: active Pi card identity and non-root permissions passed. No stream opened.')
 
 
 def copy_inputs(original, target):
@@ -467,11 +503,14 @@ def staging(user, original=SOURCE):
 
 
 def main(argv=None):
+    global OUTPUT
     args = parser().parse_args(argv)
     args.stages = [s for s in ('core', 'audio', 'voice') if getattr(args, s)] or ['core', 'audio']
     resume_command = None
+    output = None
+    evidence = {}
     try:
-        platform = detect(selected=args.platform)
+        platform = detect(selected=args.platform, evidence=evidence)
         label, repo, revision = source_revision(args)
         print('Source: ' + label)
         user = runtime_user(args.runtime_user)
@@ -481,36 +520,64 @@ def main(argv=None):
             raise ValueError('--install-pulseaudio requires --voice.')
         if args.set_audio_defaults and 'voice' not in args.stages:
             raise ValueError('--set-audio-defaults requires --voice (routing is separate from hardware setup).')
-        python = selected_python(args, user, platform)
-        if 'voice' in args.stages and not python:
-            raise ValueError('--voice requires --venv or --python; no root/system voice environment is selected.')
-        resume_command = resume(args, user, python, repo, revision)
-        print('Resume command: ' + resume_command)
-        with staging(user) as (source, user_source):
-            (orange if platform == 'orange-pi' else raspberry)(args, source, user, python, user_source=user_source)
-            if 'voice' in args.stages:
-                # Service/package selection happens separately from user setup.
-                voice = load('fusion_voice_setup', source / 'driver/voice_setup.py')
-                try:
-                    voice.prepare_service(user, args.install_pulseaudio, args.check, command, user_command)
-                except voice.Pending as error:
-                    raise Incomplete(str(error)) from error
-                options = ['--platform', platform]
-                if args.check:
-                    options.append('--check')
-                if args.set_audio_defaults:
-                    options.append('--set-audio-defaults')
-                command(user_command(user, [python, user_source / 'driver/voice_setup.py', *options], session=True))
-        print('Selected stages: files installed and non-actuating software checks passed. Physical playback/capture require operator confirmation.')
+        output = OUTPUT = InstallOutput(trusted_temporary_root(), verbose=args.verbose)
+        report('Diagnostic log (root only; save before reboot if needed): ' + str(output.path))
+        output.write('Source: ' + label + '\nDetected evidence: ' + json.dumps(evidence) + '\n')
+        with output.details():
+            python = selected_python(args, user, platform)
+            if 'voice' in args.stages and not python:
+                raise ValueError('--voice requires --venv or --python; no root/system voice environment is selected.')
+            report(f'Runtime user: {user.pw_name}; Python: {python or "/usr/bin/python3 (user site)"}')
+            report('Selected stages: ' + ', '.join(args.stages) + (' (check only)' if args.check else ''))
+            resume_command = resume(args, user, python, repo, revision)
+            with staging(user) as (source, user_source):
+                (orange if platform == 'orange-pi' else raspberry)(args, source, user, python, user_source=user_source)
+                if 'voice' in args.stages:
+                    progress(args, 'voice', 'checking user service, dependencies, devices and routing' if args.check else 'preparing user service, dependencies and routing')
+                    # Service/package selection happens separately from user setup.
+                    voice = load('fusion_voice_setup', source / 'driver/voice_setup.py')
+                    try:
+                        voice.prepare_service(user, args.install_pulseaudio, args.check, command, user_command)
+                    except voice.Pending as error:
+                        raise Incomplete(str(error)) from error
+                    options = ['--platform', platform]
+                    if args.check:
+                        options.append('--check')
+                    if args.set_audio_defaults:
+                        options.append('--set-audio-defaults')
+                    command(user_command(user, [python, user_source / 'driver/voice_setup.py', *options], session=True))
+                    report('Voice: required imports, PortAudio enumeration, user service and HAT default routing passed.')
+        report('COMPLETE: selected files are installed and non-actuating software checks passed.')
+        report('Physical playback/capture and persistence still require operator confirmation. No audio was played or recorded.')
         if args.test:
-            print('Operator tests: driver/unified-install.md acceptance steps; no playback/recording was performed here.')
+            report('Operator tests: driver/unified-install.md acceptance steps; no playback/recording was performed here.')
         return 0
+    except RebootRequired as error:
+        report('REBOOT REQUIRED: ' + str(error))
+        pending = args.stages[args.stages.index(error.stage) + 1:] if error.stage in args.stages else args.stages
+        if pending:
+            report('Waiting for activation before continuing: ' + ', '.join(pending) + '.')
+        report('This is an expected pause. No reboot was performed.')
+        report('Next: run sudo reboot, log in again, then rerun:\n' + resume_command)
+        return 3
     except (Incomplete, OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:
-        print('Installation incomplete: ' + (getattr(error, 'stderr', None) or str(error)), file=sys.stderr)
-        print('Completed earlier stages may remain installed. Preserve the full error and inspect platform manifests/rollback diagnostics before retrying; see driver/unified-install.md.', file=sys.stderr)
+        pending = isinstance(error, Incomplete) or (isinstance(error, subprocess.CalledProcessError) and error.returncode == 3)
+        detail = getattr(error, 'stderr', None) or str(error)
+        print(('ACTION REQUIRED: ' if pending else 'INSTALLATION FAILED: ') + detail, file=sys.stderr)
+        if output:
+            output.file.write(type(error).__name__ + ': ' + detail + '\n')
+            print('Details and remaining commands: sudo cat ' + shlex.quote(str(output.path)), file=sys.stderr)
+        elif evidence:
+            print('Detected evidence: ' + json.dumps(evidence), file=sys.stderr)
+        if not pending and resume_command:
+            print('Earlier completed stages are retained. Inspect the log and platform manifest/rollback diagnostics before retrying; see driver/unified-install.md.', file=sys.stderr)
         if resume_command:
-            print('After resolving the prerequisite/session/reboot, rerun: ' + resume_command, file=sys.stderr)
-        return 3 if isinstance(error, Incomplete) or (isinstance(error, subprocess.CalledProcessError) and error.returncode == 3) else 1
+            print('After resolving the issue, rerun:\n' + resume_command, file=sys.stderr)
+        return 3 if pending else 1
+    finally:
+        OUTPUT = None
+        if output:
+            output.close()
 
 
 if __name__ == '__main__':

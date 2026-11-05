@@ -35,7 +35,9 @@ class PrivilegeStaging(unittest.TestCase):
     def setUp(self):
         self.validate_temp_parent = INSTALL.trusted_temporary_root
         # /tmp ownership is a mocked OS boundary, independent of real copy modes.
-        parent = patch.object(INSTALL, 'trusted_temporary_root', return_value='/tmp')
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        parent = patch.object(INSTALL, 'trusted_temporary_root', return_value=temporary.name)
         parent.start()
         self.addCleanup(parent.stop)
 
