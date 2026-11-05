@@ -302,8 +302,9 @@ The original timeout values/hashes are retained in a private
 Review the saved routing receipt if defaults differ afterward. Modified policy
 files require review before update/removal; no whole-home cleanup is performed.
 
-The persistent implementation has mocked software coverage. Its service-restart
-and reboot/login behavior still require operator acceptance: check the policy
+The operator completed persistent installation and current-server checks on
+revision **41d7050**, as recorded below. Its service-restart and reboot/login
+behavior still require operator acceptance: check the policy
 unit and selected HAT routing, complete two wake-triggered voice turns, verify
 return to wake listening, and inspect a fresh kernel-log window for matching clock
 errors. Keep physical audio results separate from a passing `--check`. Unattended
@@ -625,14 +626,25 @@ full-duplex or hardware-rate fix, or explain earlier quiet helper recordings.
 
 **R6 is a successful session-only trial.** Restarting PulseAudio or rebooting
 clears those temporary properties. The later explicit `--hat-idle-release` option
-implements persistent HAT-only setup, with mocked tests; service-restart and
-post-reboot/login operator acceptance of that implementation remain pending.
+implements persistent HAT-only setup. On revision **41d7050**, the operator ran
+`--voice --hat-idle-release` successfully on the same target. The installer
+reported owned persistent files, user-unit activation and the current-server
+policy checks passed; prior endpoint timeout values were recorded in the runtime
+user's ownership manifest. Core binding and both MCU policy checks, active audio
+card identity/non-root permissions, required voice imports and PortAudio
+enumeration also passed. Existing defaults already selected the verified HAT
+microphone and speaker. Whole-venv dependency diagnostics remained outside the
+verified core/voice profile. This was a non-actuating installation/check run:
+it played and recorded no audio. Service-restart and post-reboot/login operator
+acceptance of the persistent implementation remain pending.
 The policy is configured only when selected. Keep the recovered rate
 configuration. No embodied-runtime, wake matching or TTS behavior changed.
 
 **Unattended startup before login remains unverified.** These are
-operator-provided logs/results for 0107a9e, not hardware validation of the later
-console/logging changes. This fresh-image installation also included the package
+operator-provided runtime logs/results for 0107a9e, plus the later 41d7050
+installation/software-check result; they do not validate persistent policy
+reapplication after a service restart or reboot. This fresh-image installation
+also included the package
 alignment and manually reviewed header permissions above; it does not establish
 an untouched-image one-command installation.
 
