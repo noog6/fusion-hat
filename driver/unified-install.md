@@ -303,10 +303,11 @@ Review the saved routing receipt if defaults differ afterward. Modified policy
 files require review before update/removal; no whole-home cleanup is performed.
 
 The operator completed persistent installation and current-server checks on
-revision **41d7050**, then reported persistence after reboot. R8 below confirms
-working wake/voice with low playback overhead after reboot/login and manual
-runtime startup. A separate service-restart trial, current-boot policy/receipt
-output and a fresh matching-clock-error count still need recorded results.
+revision **41d7050**, then confirmed persistence after reboot. R8 and its
+follow-up below verify working wake/voice with low playback overhead after
+reboot/login and manual runtime startup, a passing current-server policy check,
+and zero matching clock warnings in the queried R8 window. A separate
+service-restart trial still has no recorded operator result.
 Keep physical audio results separate from a passing `--check`. Unattended
 startup before login remains unverified.
 
@@ -652,14 +653,19 @@ voice/provider/runtime failures and no remaining non-daemon threads.
 | Turn 1 playback / reported clip | 3,048 / 2,972 ms (76 ms overhead) |
 | Turn 2 playback / reported clip | 3,546 / 3,436 ms (110 ms overhead) |
 | Turn 1 / 2 synthesis elapsed | 8,745 / 9,078 ms |
+| Matching `sunxi_i2s_clk_open` messages | 0 in the queried current-boot window, 17:40:40–17:42:00 |
 
-This supports the reported post-reboot persistence and continued low playback
-overhead on this target. Synthesis remained slow in R8; the logs separate that
-stage from playback but do not isolate its cause. R8's transcript contains no
-current-boot policy/receipt output or kernel-log count, so zero matching clock
-errors after reboot are **not yet verified**. A standalone PulseAudio
-service-restart trial also has no recorded operator result. A successful "opie"
-detection does not establish recognition consistency.
+The operator's follow-up ran the installed `pulse_idle.py check`: HAT card
+identity/read/write access, persistent files, the user unit and current-server
+policy/receipt checks passed. A current-boot kernel query covering R8 from
+**2026-11-05 17:40:40 to 17:42:00** returned **0** matching
+`sunxi_i2s_clk_open` messages. Together with R8, these results confirm persistent
+policy activation, functional wake/two-turn voice and low playback overhead
+after reboot/login on this target. This count applies to that queried window,
+not every possible stream or the entire boot. Synthesis remained slow in R8;
+the logs separate that stage from playback but do not isolate its cause.
+A standalone PulseAudio service-restart trial still has no recorded operator
+result. A successful "opie" detection does not establish recognition consistency.
 
 **Unattended startup before login remains unverified.** These are
 operator-provided runtime logs/results for 0107a9e, plus the later 41d7050
