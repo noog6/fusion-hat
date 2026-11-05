@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Platform-aware orchestration; platform installers retain hardware ownership."""
 import argparse
+from collections import deque
 from contextlib import contextmanager
 import hashlib
 import importlib.util
@@ -11,6 +12,7 @@ import pwd
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -358,24 +360,70 @@ def copy_inputs(original, target):
             shutil.copy2(item, destination)
 
 
+def _check_header_component(path, info):
+    # Symlink permission bits are not an access boundary. Its owner and the
+    # permissions of every directory used to reach it are checked separately.
+    if info.st_uid != 0 or (not stat.S_ISLNK(info.st_mode) and info.st_mode & 0o022):
+        raise ValueError('Kernel headers/build inputs must be root-owned and not group/world writable: ' + str(path))
+
+
+def _resolve_header_path(path):
+    """Follow links component by component, validating before each traversal."""
+    text = os.fspath(path)
+    components = text.split('/')
+    remaining = deque(components[1:] if text.startswith('/') else
+                      [*Path.cwd().parts[1:], *components])
+    current = Path('/')
+    info = current.lstat()
+    _check_header_component(current, info)
+    links = 0
+    while remaining:
+        component = remaining.popleft()
+        if not stat.S_ISDIR(info.st_mode):
+            raise NotADirectoryError(str(current))
+        if component in ('', '.'):
+            continue
+        if component == '..':
+            current = current.parent
+            info = current.lstat()
+            _check_header_component(current, info)
+            continue
+        candidate = current / component
+        candidate_info = candidate.lstat()
+        _check_header_component(candidate, candidate_info)
+        if stat.S_ISLNK(candidate_info.st_mode):
+            links += 1
+            if links > 40:
+                raise ValueError('Too many symlinks in kernel header path: ' + str(path))
+            target = os.readlink(candidate)
+            target_components = target.split('/')
+            if target.startswith('/'):
+                current = Path('/')
+                info = current.lstat()
+                _check_header_component(current, info)
+                target_components = target_components[1:]
+            # Keep relative targets relative to the link's parent, and preserve
+            # '..' until earlier links/components have actually been followed.
+            remaining.extendleft(reversed(target_components))
+        else:
+            current, info = candidate, candidate_info
+    return current, info
+
+
 def trusted_headers(path):
-    """Resolve once; reject writable build inputs, including symlink targets."""
-    path = Path(path).resolve(strict=True)
+    """Reject writable inputs and directories anywhere along their link chains."""
+    path, _ = _resolve_header_path(path)
     seen = set()
     pending = [path]
     while pending:
         item = pending.pop()
-        resolved = item.resolve(strict=True)
+        # Validate the entire traversal even when its final target was visited
+        # through another alias. A new alias may pass through an unsafe parent.
+        resolved, info = _resolve_header_path(item)
         if resolved in seen:
             continue
         seen.add(resolved)
-        for component in (resolved, *resolved.parents):
-            info = component.stat()
-            # /tmp may be sticky, but headers/build inputs must not depend on
-            # any group/world writable location, even a sticky directory.
-            if info.st_uid != 0 or info.st_mode & 0o022:
-                raise ValueError('Kernel headers/build inputs must be root-owned and not group/world writable: ' + str(component))
-        if resolved.is_dir():
+        if stat.S_ISDIR(info.st_mode):
             pending.extend(resolved.iterdir())
     return str(path)
 

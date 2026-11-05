@@ -51,9 +51,11 @@ copy is used only for Python packaging, imports and audio checks; root never
 executes that copy or promotes its build outputs into the privileged tree. Both
 directories are removed on exit. Only code/package/build inputs are copied, not the
 repository's `.git`, work directories or venv. Kernel modules are built as root
-in the protected tree, with a clean build environment. Existing headers and their symlink targets must be root-owned and
-not group/world writable; resolve a failure with an administrator-reviewed
-header installation, not by giving the runtime user access to privileged builds.
+in the protected tree, with a clean build environment. Existing headers, every
+symlink hop and every directory used to reach them must be root-owned, with no
+group/world writable directories or regular files. Resolve a failure with an
+administrator-reviewed header installation, not by giving the runtime user
+access to privileged builds.
 The installer reports Git HEAD, local modification status, and the snapshot's
 SHA256. Keep that output for review.
 Existing owned drivers are retained on rerun; a new source snapshot does not
@@ -357,7 +359,7 @@ TTS behavior and motor/servo behavior are outside this change.
 
 ## Repository verification
 
-The implementation was checked on cloud Python 3.12 / x86_64: **121 unittest
+The implementation was checked on cloud Python 3.12 / x86_64: **127 unittest
 cases passed, no skips**, including the existing core/audio transaction, rollback,
 policy, permission, stream-boundary and real DTC fixture composition cases. New
 cases exercise supported/rejected identities (including the vendor alias), both
@@ -368,6 +370,12 @@ cases also cover separate privileged/user copies for a different selected accoun
 protected kernel build/output paths, untrusted-header rejection, fresh Pi voice
 venv provisioning, optional-versus-required dependency failures and active
 markers/extras, real annotated-tag peeling, and CLI interpreter/exit propagation.
+Header regression fixtures explicitly model ownership/permissions in independent
+temporary directories. They reject writable intermediate symlink directories
+and runtime-owned hops, including the replaceable-Makefile layout, while
+accepting trusted relative/absolute chains and preserving symlink-before-`..`
+semantics. The complete suite also passes from a clean tracked-file export
+without `work/`, beneath a writable parent directory.
 Privileged and hardware boundaries are mocked; these results are not board validation.
 
 `bash -n`, ShellCheck 0.10, Python compilation and `git diff --check` passed.
