@@ -469,11 +469,29 @@ clock conflicted with a new 44.1 kHz request, or existing 44.1 kHz capture
 conflicted with a new 48 kHz request. ALSA reported failed hardware-parameter
 setup. An idle PulseAudio snapshot showed the HAT sink at 48 kHz and its
 microphone source at 44.1 kHz; both were suspended and hardware PCMs were closed.
-After a trial per-user 48 kHz default/alternate-rate configuration was suggested,
-another operator log still contained both conflict directions. Effective server
-settings and live PCM ownership/routing still need verification. No rate fix is
-validated or automatically installed. R1/R2 establish functional voice use, not
-error-free audio negotiation; a causal link to playback latency is unproven.
+An initial trial per-user 48 kHz drop-in was not loaded: a follow-up dump still
+showed default 44.1 kHz / alternate 48 kHz, the ALSA default identified PulseAudio,
+and PulseAudio owned active HAT capture at 44.1 kHz. A new log still contained
+both conflict directions. Creating a user main `daemon.conf` that included the
+system main configuration allowed the user drop-in to load; the dump and both
+HAT endpoints then showed 48 kHz.
+
+That applied trial did not pass runtime acceptance. In **R4**, the operator
+reported no wake/voice microphone response; a console-started voice session
+timed out without transcription. The operator preserved the trial drop-in and
+the newly created main file as disabled backups, restored default 44.1 kHz /
+alternate 48 kHz, restarted the user service and explicitly reselected both
+named HAT defaults. **R5** then detected “be”, transcribed two turns, completed
+both response playback calls, closed at the two-turn limit and resumed wake
+listening. Rates and routing were both restored, so this does not isolate why
+R4 failed. R5 playback elapsed times exceeded reported clip lengths by about
+2.2–2.3 seconds; its kernel-log cleanliness remains unverified.
+
+**The 48 kHz trial is rolled back, not a validated correction.** No rate fix is
+automatically installed. Successful R1/R2/R5 sessions establish functional voice
+use, not error-free audio negotiation; a causal link between the kernel clock
+conflicts and playback latency is unproven. Preserve the recovered configuration
+while investigating the clock issue.
 
 **Unattended startup before login remains unverified.** These are
 operator-provided logs/results for 0107a9e, not hardware validation of the later
