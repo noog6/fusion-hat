@@ -425,15 +425,39 @@ On the fresh-image attempt, after the package/header prerequisites above were
 resolved, the operator built and installed core, rebooted, and passed the active
 binding and both MCU policy checks. Audio files then installed successfully;
 an immediate rerun recognized the identical files and correctly requested its
-own reboot. At this point **fresh-image audio activation, voice dependency/service
-setup, physical conversation and post-reboot verification remain pending**.
-These are operator-reported results for 0107a9e, not hardware validation of the
-later console/logging changes.
+own reboot. After that reboot, the operator's installation log passed active
+audio identity/access checks, installed and started PulseAudio for `pi`, installed
+the pinned voice dependency in the selected venv, and passed imports and
+PortAudio/PyAudio enumeration (20 devices). The explicit routing option saved
+the previous defaults and selected the verified HAT microphone and speaker.
+Whole-venv pip diagnostics remained for the omitted broad Fusion dependencies;
+the required core/voice profile passed.
+
+With the backed-up Opie configuration restored, the operator then started
+`python main.py --config=./config/opie-agentic.toml`. Fresh-image **R1** on
+2026-11-05 detected alias **“be”**, transcribed “can you hear me now”, completed
+response playback, transcribed the follow-up “yes i can hear you too”, completed
+a second response playback, closed at the two-turn limit and reacquired the
+microphone for wake listening. The Vosk model downloaded during this explicitly
+started runtime session, not during installation checks.
+
+R1 still showed variable timing: the first response reported 2,275 ms of audio
+and 4,540 ms of playback; the second reported 9,051 ms synthesis, 3,204 ms of audio
+and 3,296 ms playback. These observations do not establish the cause of latency
+or resolution of the earlier playback-overhead issue.
+
+**Fresh-image reboot/login persistence after completing voice setup remains
+pending**: repeat wake activation and two spoken turns without manually starting
+the audio service or changing routing. Unattended startup before login remains
+unverified. These are operator-provided logs/results for 0107a9e, not hardware
+validation of the later console/logging changes. This fresh-image installation
+also included the package alignment and manually reviewed header permissions
+above; it does not establish an untouched-image one-command installation.
 
 Cloud tests mock privileged operations and hardware/session boundaries. Real
 DTC fixture composition checks preserve MCU/HDMI/PB4, but do not validate the
-installed target DTB or hardware. Raspberry Pi and new unified Orange Pi
-operator acceptance above remain required. Camera, robot body, wake matching,
+installed target DTB or hardware. Raspberry Pi regression acceptance and the
+remaining Orange Pi operator checks above remain required. Camera, robot body, wake matching,
 TTS behavior and motor/servo behavior are outside this change.
 
 ## Repository verification
