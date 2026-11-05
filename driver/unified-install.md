@@ -496,10 +496,39 @@ support a handoff/negotiation issue and do not establish simultaneous successful
 capture/playback at different rates.
 
 **The 48 kHz trial is rolled back, not a validated correction.** No rate fix is
-automatically installed. Successful R1/R2/R5 sessions establish functional voice
-use, not error-free audio negotiation; a causal link between the kernel clock
-conflicts and playback latency is unproven. Preserve the recovered configuration
-while investigating the clock issue.
+automatically installed.
+
+The next operator trial changed only the HAT sink and actual microphone source
+property `module-suspend-on-idle.timeout` to `0`, then reloaded
+`module-suspend-on-idle` so it read those properties. The existing idle module
+had no custom arguments (PulseAudio 17 defaults to five seconds). These were
+temporary user-server properties; the commands did not change sample-rate
+configuration or the idle timeout for other devices.
+
+In **R6**, the operator reported a substantially better response. The runtime
+detected “oh be”, completed two transcribed voice turns and both response playback
+calls, resumed wake listening, and exited with code 0, zero reported voice,
+provider or runtime failures and no remaining non-daemon threads.
+
+| Measurement | R5 recovered baseline | R6 HAT immediate idle release |
+| --- | --- | --- |
+| Engagement cue elapsed time | 5,409 ms | 320 ms |
+| Turn 1 playback / reported clip | 5,848 / 3,529 ms | 3,300 / 3,204 ms |
+| Turn 2 playback / reported clip | 5,521 / 3,297 ms | 3,544 / 3,390 ms |
+| Playback overhead, turns 1 / 2 | 2,319 / 2,224 ms | 96 / 154 ms |
+| Matching `sunxi_i2s_clk_open` messages | 690 in the queried R5 window | 0 since the R6 trial marker, including startup, conversation and exit |
+
+The different windows both covered a two-turn interaction; this is an observed
+trial comparison, not a general error-rate benchmark. The timing improvement and
+zero matching clock errors strongly support idle hardware retention as a cause
+of the observed handoff delays on this setup. This does not establish a general
+full-duplex or hardware-rate fix, or explain earlier quiet helper recordings.
+
+**R6 is a successful session-only workaround.** Restarting PulseAudio or rebooting
+clears the temporary properties. Persistent HAT-only setup, repeat testing and
+post-reboot/login acceptance of that policy remain pending; it is not installed
+automatically by this revision. Keep the recovered rate configuration. No
+embodied-runtime, wake matching or TTS behavior was changed for this trial.
 
 **Unattended startup before login remains unverified.** These are
 operator-provided logs/results for 0107a9e, not hardware validation of the later
