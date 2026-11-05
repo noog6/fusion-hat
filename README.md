@@ -19,19 +19,32 @@ Fusion HAT is a multifunctional expansion board that allows Raspberry Pi to be q
 
 ## Installation
 
-Install Fusion Hat
+Use the platform-aware installer from this fork. It supports the existing
+Raspberry Pi OS workflow and the narrowly validated experimental Orange Pi
+Zero 3W / A733 Armbian image. See the [unified installation guide](driver/unified-install.md)
+for exact compatibility, options, reboot/resume, voice setup and acceptance limits.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/sunfounder/fusion-hat/v1/install.sh | sudo bash
+# From your reviewed checkout (preserves local work):
+sudo bash ./install.sh
+
+# Orange Pi: select the existing Python 3.14.4 runtime venv:
+sudo bash ./install.sh --runtime-user "$(id -un)" --venv /absolute/path/to/.venv
+
+# Standalone bootstrap from this fork, with existing git and python3:
+curl -fsSL https://raw.githubusercontent.com/noog6/fusion-hat/v1/install.sh | sudo bash
 ```
 
-After installation, reboot when prompted. After reboot, test the speaker:
+Default stages are core + audio; voice is optional. Reboot explicitly when
+requested, log in, then rerun the complete printed resume command. Fresh Orange
+Pi installation requires core activation before audio installation, then audio
+activation. No installer reboots or opens test streams. Physical playback and
+capture require explicit operator tests in the guide.
 
-```bash
-fusion_hat speaker test
-```
-
-Tab completion is enabled automatically (open a new shell).
+The CLI repair/update/speaker-setup commands below describe the Raspberry Pi
+workflow; do not use Pi repair or global audio setup on Orange Pi. Use the
+[core](driver/orange-pi-zero3w-install.md) and
+[audio](driver/orange-pi-zero3w-audio.md) installers for Orange Pi recovery.
 
 ## CLI Commands
 
@@ -72,13 +85,11 @@ sphinx-apidoc -f -d 1 -e -M -P -T -o source/api ../fusion_hat
 
 ## Debug record
 
-```bash
-sudo pip uninstall --break fusion_hat -y && sudo pip install --break git+https://github.com/sunfounder/fusion-hat.git@1.1.x
-sudo pip uninstall --break fusion_hat -y && sudo pip install ~/fusion-hat/ --break-system-packages --no-deps --no-build-isolation
-sudo pip install ~/fusion-hat/ --break-system-packages --no-deps --no-build-isolation
-cd ~/fusion-hat/driver && make all && sudo make install
-cd ~/fusion-hat/examples
-```
+Preserve the unified installer's source revision, stage output and any ownership
+manifest/rollback diagnostic. Follow the [troubleshooting and recovery guide](driver/unified-install.md#troubleshooting-and-recovery)
+before replacing installed files or changing boot configuration. Raspberry Pi
+CLI `update` now retrieves this fork; Orange Pi uses the explicit unified
+command with its runtime-user/venv options.
 
 ## CLI Commands
 

@@ -52,7 +52,7 @@ def update():
     import os as _os
     from ._version import __version__
 
-    URL = "https://raw.githubusercontent.com/sunfounder/fusion-hat/v1/install.sh"
+    URL = "https://raw.githubusercontent.com/noog6/fusion-hat/v1/install.sh"
 
     print("")
     print(f"  Current version: {__version__}")

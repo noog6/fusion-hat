@@ -177,15 +177,19 @@ Run the following installation command:
 
 .. code-block:: bash
 
-   curl -sSL https://raw.githubusercontent.com/sunfounder/fusion-hat/v1/install.sh | sudo bash
+   curl -sSL https://raw.githubusercontent.com/noog6/fusion-hat/v1/install.sh | sudo bash
 
-After installation completes, reboot the Raspberry Pi. Then execute the audio setup script:
+The fork's installer validates the platform and prints a complete command to
+resume after an explicit reboot/login. It preserves an existing source checkout
+and performs no automatic playback/recording. Orange Pi Zero 3W users must
+select the supported image and existing runtime venv as described in the
+`unified installation guide <https://github.com/noog6/fusion-hat/blob/v1/driver/unified-install.md>`_.
+Voice dependencies and changing user audio defaults are separate opt-in stages.
 
-.. code-block:: bash
-
-   sudo /opt/setup_fusion_hat_audio.sh
-
-This completes the software installation process for the Fusion HAT.
+After the installer requests activation, reboot the Raspberry Pi explicitly,
+log in and rerun the complete resume command it printed. This completes the
+non-streaming core/audio stages. Playback and microphone acceptance are separate
+operator tests in the unified guide.
 
 Safe Shutdown
 --------------

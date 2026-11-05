@@ -20,7 +20,7 @@ keywords = ["fusion_hat", "sunfounder"]
 dynamic = ["version"]
 
 dependencies = [
-  "sunfounder-voice-assistant @ git+https://github.com/sunfounder/sunfounder-voice-assistant.git",
+  "sunfounder-voice-assistant @ git+https://github.com/sunfounder/sunfounder-voice-assistant.git@32d2dae40d47fd6c4fe4180db28cd47e83efd851",
   "evdev",
   "smbus2",
   "gpiozero",

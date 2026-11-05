@@ -23,9 +23,11 @@ The operator also confirmed the matching `initrd.img`, the current-kernel
 that this board's legacy U-Boot wrapper contains the exact raw initramfs payload;
 the same check runs after rebuilding, so a stale wrapped image blocks activation.
 
-Audio, host GPIO, power-button/shutdown integration and runtime integration are
-excluded. Do not run `install.sh`, `make install`, audio setup or automatic Pi
-repair. The Raspberry Pi installer/overlay remain unchanged; driver parameters
+This core installer excludes audio, host GPIO and power-button/shutdown
+integration. The [unified `install.sh` entry point](unified-install.md) now
+dispatches to this installer and separately selectable audio/voice stages.
+Do not run Pi `make install`, Pi audio setup or automatic Pi repair on Orange Pi.
+The Raspberry Pi overlay remains separate; driver parameters
 default to their previous behavior outside this experimental installation.
 
 ## 1. Prerequisites and build only

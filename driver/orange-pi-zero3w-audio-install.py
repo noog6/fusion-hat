@@ -239,13 +239,7 @@ class Installation:
                 raise ValueError(f'Managed audio file changed: {name}; preserve/resolve before removal')
 
     def preflight(self, runtime_user):
-        if self.run(['uname', '-m']) != 'aarch64' or self.run(['uname', '-r']) != CORE.RELEASE:
-            raise ValueError('Requires Orange Pi Zero 3W target aarch64 kernel ' + CORE.RELEASE)
-        arm = CORE.settings(self.path('/etc/armbian-release').read_text())
-        os_release = CORE.settings(self.path('/etc/os-release').read_text())
-        if arm.get('BOARD') != 'orangepizero3w' or arm.get('VERSION') != '26.8.3' or \
-           os_release.get('ID') != 'ubuntu' or os_release.get('VERSION_CODENAME') != 'resolute':
-            raise ValueError('Requires the verified Orange Pi Zero 3W / Armbian 26.8.3 / Ubuntu resolute image')
+        CORE.Installation(self.root, self.run).compatibility()
         if pwd.getpwnam(runtime_user).pw_uid == 0:
             raise ValueError('Select a non-root runtime user')
         for tool in ('dtc', 'fdtoverlay', 'aplay', 'arecord', 'udevadm', 'groupadd', 'groupdel', 'gpasswd'):
