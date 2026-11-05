@@ -485,7 +485,15 @@ named HAT defaults. **R5** then detected “be”, transcribed two turns, comple
 both response playback calls, closed at the two-turn limit and resumed wake
 listening. Rates and routing were both restored, so this does not isolate why
 R4 failed. R5 playback elapsed times exceeded reported clip lengths by about
-2.2–2.3 seconds; its kernel-log cleanliness remains unverified.
+2.2–2.3 seconds. The operator's kernel query covering R5 startup and conversation
+(2026-11-05 16:16:50–16:18:00 local time) counted **690**
+`sunxi_i2s_clk_open` messages, confirming that the recovered session still had
+clock conflicts. Further live snapshots showed capture running at 44.1 kHz /
+S16_LE / stereo while playback was closed or OPEN; playback later ran at 48 kHz /
+S16_LE / stereo while capture was OPEN or closed, then capture resumed at
+44.1 kHz. `fuser` identified PulseAudio as the hardware owner. These observations
+support a handoff/negotiation issue and do not establish simultaneous successful
+capture/playback at different rates.
 
 **The 48 kHz trial is rolled back, not a validated correction.** No rate fix is
 automatically installed. Successful R1/R2/R5 sessions establish functional voice
