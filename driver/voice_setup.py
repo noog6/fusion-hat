@@ -3,6 +3,7 @@
 import argparse
 import datetime
 import json
+from importlib import metadata
 import os
 from pathlib import Path
 import re
@@ -181,7 +182,53 @@ def routing(number, card_id, change=False, check=False, runner=run, state_home=N
     return True
 
 
+def dependency_issues(distribution=metadata.distribution):
+    """Validate the core/voice profile and its active transitive requirements.
+
+    Fusion's legacy broad metadata also describes optional GPIO/display modules.
+    Neither managed hardware path uses those modules for core + voice. Only that
+    distribution gets a scoped requirement set; every voice dependency retains
+    its own complete metadata, version constraints, markers and requested extras.
+    """
+    from packaging.markers import default_environment
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    pending = [(Requirement(name), 'selected core/voice profile') for name in
+               ('fusion_hat', 'evdev', 'sunfounder-voice-assistant', 'packaging')]
+    seen, issues = set(), []
+    environment = default_environment()
+    while pending:
+        requirement, parent = pending.pop()
+        name = canonicalize_name(requirement.name)
+        try:
+            installed = distribution(name)
+        except metadata.PackageNotFoundError:
+            issues.append(f'{parent} requires {requirement}; {name} is not installed')
+            continue
+        if requirement.specifier and not requirement.specifier.contains(installed.version, prereleases=True):
+            issues.append(f'{parent} requires {requirement}; installed {name}=={installed.version}')
+        key = name, frozenset(requirement.extras)
+        if key in seen:
+            continue
+        seen.add(key)
+        requirements = ('evdev', 'sunfounder-voice-assistant') if name == 'fusion-hat' else installed.requires or ()
+        for value in requirements:
+            dependency = Requirement(value)
+            if dependency.marker and not any(dependency.marker.evaluate(dict(environment, extra=extra))
+                                             for extra in ('', *requirement.extras)):
+                continue
+            pending.append((dependency, f'{name}=={installed.version}'))
+    return sorted(set(issues))
+
+
 def software_checks(runner=run):
+    issues = dependency_issues()
+    if issues:
+        print('Required core/voice dependency failures:')
+        for issue in issues:
+            print('  ' + issue)
+        return False
     # No stream opens, hardware writes, model creation/download or provider calls.
     runner([sys.executable, '-c',
             'import importlib.metadata as m,json; '
@@ -189,6 +236,7 @@ def software_checks(runner=run):
             'u=json.loads(d.read_text("direct_url.json") or "{}"); '
             f'assert u.get("vcs_info",{{}}).get("commit_id")=="{VOICE_REVISION}", "Voice dependency revision differs; rerun --voice without --check to install the documented pin"; '
             'import sunfounder_voice_assistant, pyaudio, sounddevice as sd; '
+            'from sunfounder_voice_assistant.voice_assistant import VoiceAssistant; '
             'from fusion_hat.battery import Battery; from fusion_hat.user_button import UserButton; '
             'print("voice",m.version("sunfounder-voice-assistant")); '
             'print("PortAudio",sd.get_portaudio_version()); print(sd.query_hostapis()); print(sd.query_devices()); '
@@ -196,8 +244,20 @@ def software_checks(runner=run):
     result = subprocess.run([sys.executable, '-m', 'pip', 'check'], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     print(result.stdout)
     if result.returncode:
-        print('pip check reports dependency conflicts/missing packages. Core is deliberately installed with --no-deps; broad Fusion metadata also declares unrelated GPIO/display dependencies. Inspect each diagnostic; this is not proof of a hardware failure and not a reason to install the entire Pi dependency set on Orange Pi.')
-    return result.returncode == 0
+        print('Whole-venv pip check diagnostics remain, outside the verified core/voice profile. '
+              'Fusion declares optional Pi GPIO/display dependencies omitted by core-only installation; '
+              'other applications may also have conflicts. Review the exact diagnostics before using '
+              'those features/applications. They do not fail this stage when all required core/voice '
+              'dependencies, imports and enumeration pass. No claim is made that the entire venv is conflict-free.')
+    return True
+
+
+def install_python(platform, runner=run):
+    # A Pi hardware install may have used the user site. Install the local Fusion
+    # core into this selected voice venv before checking imports on either path.
+    source = Path(__file__).resolve().parents[1]
+    runner(['bash', source / 'driver/install-core-python.sh', '--platform', platform, sys.executable])
+    runner([sys.executable, '-m', 'pip', 'install', 'packaging', VOICE_REQUIREMENT])
 
 
 def main():
@@ -216,7 +276,7 @@ def main():
         if sys.prefix == sys.base_prefix:
             raise RuntimeError('Voice setup requires an existing selected venv.')
         if not args.check:
-            run([sys.executable, '-m', 'pip', 'install', VOICE_REQUIREMENT])
+            install_python(args.platform)
             # Record exactly what the resolver installed, including transitive
             # dependencies. This is an inventory, not a portable full lockfile.
             inventory = Path.home() / '.local/state/fusion-hat'
@@ -234,8 +294,9 @@ def main():
             return 3
         print('Voice software checks passed. Physical speech and post-login/unattended persistence require operator acceptance.')
         return 0
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, ImportError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print('Voice stage incomplete: ' + str(error), file=sys.stderr)
+        print('To provision missing Fusion/core/voice packages in this selected venv, rerun --voice without --check.', file=sys.stderr)
         print('For PulseAudio_Initialize / sounddevice import failures, check pactl info and systemctl --user status in the runtime session before changing PortAudio or reinstalling hardware. For native-extension build failures inspect the compiler error, selected Python development headers and apt-cache policy portaudio19-dev.', file=sys.stderr)
         return 3
 

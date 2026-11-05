@@ -161,6 +161,7 @@ class ProvenanceAndUser(unittest.TestCase):
             cmd = INSTALL.user_command(USER, ['pactl', 'info'], session=True)
         self.assertEqual(cmd[:6], ['sudo', '-H', '-u', 'runtime', '--', 'env'])
         self.assertIn('-i', cmd)
+        self.assertEqual(cmd[cmd.index('-C') + 1], USER.pw_dir)
         self.assertIn('HOME=/home/runtime', cmd)
         self.assertIn('XDG_RUNTIME_DIR=/run/user/1001', cmd)
         self.assertIn('DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus', cmd)
@@ -210,7 +211,8 @@ class OrangeStages(unittest.TestCase):
         self.core_module = SimpleNamespace(Installation=lambda: self.core, TOKEN='fusion-hat-core', digest=INSTALL.CORE.digest)
         self.audio_module = SimpleNamespace(Installation=lambda: self.audio, TOKEN='fusion-hat-audio')
         self.patches = [patch.object(INSTALL, 'load', side_effect=[self.core_module, self.audio_module]),
-                        patch.object(INSTALL.shutil, 'copyfile'), patch.object(INSTALL, 'active_core', return_value=True)]
+                        patch.object(INSTALL.shutil, 'copyfile'), patch.object(INSTALL, 'active_core', return_value=True),
+                        patch.object(INSTALL, 'trusted_headers', return_value='/trusted/headers')]
         for item in self.patches:
             item.start()
             self.addCleanup(item.stop)
@@ -364,6 +366,12 @@ class AudioServicesAndRouting(unittest.TestCase):
             self.assertEqual(len(list(Path(tmp).glob('fusion-hat/routing-*.json'))), 2)
 
 class DispatchAndFailure(unittest.TestCase):
+    def setUp(self):
+        # The cloud /tmp mount has a synthetic owner; privileged metadata is mocked.
+        parent = patch.object(INSTALL, 'trusted_temporary_root', return_value='/tmp')
+        parent.start()
+        self.addCleanup(parent.stop)
+
     def test_pi_and_orange_dispatch_from_snapshot_preserve_checkout(self):
         # Both branches are reached through main with all privilege/hardware
         # boundaries mocked, including chown. The actual copy is exercised.
@@ -378,7 +386,7 @@ class DispatchAndFailure(unittest.TestCase):
                  patch.object(INSTALL, 'selected_python', return_value='/venv/bin/python'), \
                  patch.object(INSTALL, 'orange') as orange, patch.object(INSTALL, 'raspberry') as pi:
                 invoked = orange if platform == 'orange-pi' else pi
-                def stage(args, source, user, python):
+                def stage(args, source, user, python, *, user_source):
                     self.assertNotEqual(source, ROOT)
                     self.assertEqual((source / 'driver/Makefile').read_bytes(), (ROOT / 'driver/Makefile').read_bytes())
                     self.assertFalse((source / 'work').exists())
@@ -473,7 +481,7 @@ class PiWorkflow(unittest.TestCase):
             with patch.object(INSTALL.shutil, 'which', return_value='/usr/bin/raspi-config'):
                 with self.assertRaisesRegex(INSTALL.Incomplete, 'reboot explicitly'):
                     INSTALL.raspberry(args, ROOT, USER, None, runner, root)
-                self.assertIn(['make', '-C', str(ROOT / 'driver'), 'BOOT_ONLY=1', 'install'], calls)
+                self.assertIn(INSTALL.kernel_build(['make', '-C', str(ROOT / 'driver'), 'BOOT_ONLY=1', 'install']), calls)
                 self.assertFalse(any('setup_fusion_hat_audio.sh' in ' '.join(c) for c in calls))
                 self.assertEqual(config.read_text().count('dtoverlay=sunfounder-fusionhat'), 1)
                 self.assertEqual(config.with_name('config.txt.fusion-hat.before').read_text(), '# existing\ndtparam=i2c_arm=on\n')
@@ -484,7 +492,7 @@ class PiWorkflow(unittest.TestCase):
                 installed = True
                 calls.clear()
                 INSTALL.raspberry(args, ROOT, USER, None, runner, root)
-                self.assertFalse(any(c[0] == 'make' for c in calls))
+                self.assertFalse(any('make' in c for c in calls))
                 audio = next(c for c in calls if 'setup_fusion_hat_audio.sh' in ' '.join(c))
                 self.assertIn('--non-actuating', audio)
                 self.assertIn('--runtime-user', audio)
@@ -588,11 +596,28 @@ class HardwareIdentity(unittest.TestCase):
 
 
 class ForkUpdate(unittest.TestCase):
-    def test_cli_update_bootstrap_stays_on_this_fork(self):
-        cli = load('fusion_hat._cli', 'fusion_hat/_cli.py')
-        with patch('os.system', return_value=0) as system:
-            cli.update()
-        system.assert_called_once_with('curl -fsSL https://raw.githubusercontent.com/noog6/fusion-hat/v1/install.sh | sudo bash')
+    def setUp(self):
+        self.cli = load('fusion_hat._cli', 'fusion_hat/_cli.py')
+
+    def test_cli_update_passes_active_venv_and_propagates_exit(self):
+        with patch('subprocess.run', side_effect=[SimpleNamespace(stdout=b'installer'), SimpleNamespace(returncode=3)]) as run, \
+             patch('sys.prefix', '/runtime/venv'), patch('sys.base_prefix', '/usr'), \
+             patch('sys.executable', '/runtime/venv/bin/python'):
+            self.assertEqual(self.cli.update(), 3)
+        self.assertEqual(run.call_args_list[0].args[0], ['curl', '-fsSL', 'https://raw.githubusercontent.com/noog6/fusion-hat/v1/install.sh'])
+        self.assertEqual(run.call_args_list[1].args[0], ['sudo', 'bash', '-s', '--', '--python', '/runtime/venv/bin/python'])
+        self.assertEqual(run.call_args_list[1].kwargs['input'], b'installer')
+
+    def test_cli_explicit_selector_overrides_active_and_console_status_is_returned(self):
+        with patch('sys.argv', ['fusion_hat', 'update', '--venv', '/different venv', '--runtime-user', 'runtime']), \
+             patch('subprocess.run', side_effect=[SimpleNamespace(stdout=b'script'), SimpleNamespace(returncode=19)]) as run:
+            self.assertEqual(self.cli.main(), 19)
+        self.assertEqual(run.call_args_list[1].args[0][-4:], ['--python', '/different venv/bin/python', '--runtime-user', 'runtime'])
+
+    def test_cli_download_failure_never_starts_installer(self):
+        with patch('subprocess.run', side_effect=subprocess.CalledProcessError(7, ['curl'])) as run:
+            self.assertEqual(self.cli.update(python='/venv/bin/python'), 7)
+        self.assertEqual(run.call_count, 1)
 
 
 if __name__ == '__main__':

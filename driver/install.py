@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Platform-aware orchestration; platform installers retain hardware ownership."""
 import argparse
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
@@ -104,7 +105,7 @@ def runtime_user(name=None):
 
 def user_command(user, args, session=False):
     # Never inherit root's HOME, venv, Python path, Pulse socket or DBus address.
-    env = ['env', '-i', f'PATH={user.pw_dir}/.local/bin:/usr/local/bin:/usr/bin:/bin', f'HOME={user.pw_dir}',
+    env = ['env', '-i', '-C', user.pw_dir, f'PATH={user.pw_dir}/.local/bin:/usr/local/bin:/usr/bin:/bin', f'HOME={user.pw_dir}',
            f'USER={user.pw_name}', f'LOGNAME={user.pw_name}', 'LANG=C.UTF-8']
     if session:
         env += [f'XDG_RUNTIME_DIR=/run/user/{user.pw_uid}',
@@ -215,7 +216,8 @@ def verify_owned(installation, user, token):
     return state
 
 
-def orange(args, source, user, python, runner=command):
+def orange(args, source, user, python, runner=command, user_source=None):
+    user_source = user_source or source
     core_module = load('selected_core', source / 'driver/orange-pi-zero3w-install.py')
     audio_module = load('selected_audio', source / 'driver/orange-pi-zero3w-audio-install.py')
     core, audio = core_module.Installation(), audio_module.Installation()
@@ -233,13 +235,14 @@ def orange(args, source, user, python, runner=command):
                 shutil.copyfile(core.path(installed), module)
                 print('Retaining the owned installed module; no driver upgrade requested.')
             else:
-                runner(user_command(user, ['bash', source / 'driver/build-module.sh', CORE.RELEASE, args.headers]))
+                headers = trusted_headers(args.headers)
+                runner(kernel_build(['bash', source / 'driver/build-module.sh', CORE.RELEASE, headers]))
             core.install(core.artifacts(config, dtb), user.pw_name, state)
-            runner(user_command(user, ['bash', source / 'driver/install-core-python.sh', python]))
+            runner(user_command(user, ['bash', user_source / 'driver/install-core-python.sh', python]))
         if args.check:
             if not state:
                 raise Incomplete('Core files are absent. Run --core without --check first; see the core prerequisites guide.')
-            runner(user_command(user, [python, source / 'driver/core_python_preflight.py']))
+            runner(user_command(user, [python, user_source / 'driver/core_python_preflight.py']))
             runner(user_command(user, [python, '-c', 'from fusion_hat.battery import Battery; from fusion_hat.user_button import UserButton; from fusion_hat.servo import Servo; print("Core imports passed; no devices instantiated")']))
         state = verify_owned(core, user, core_module.TOKEN)
     if not state:
@@ -257,11 +260,12 @@ def orange(args, source, user, python, runner=command):
             raise Incomplete('Audio files are absent. Run with --audio after core activation.')
         if not Path('/sys/firmware/devicetree/base/fusion-hat-audio').exists():
             raise Incomplete('Audio files installed; reboot required, then rerun this command after login.')
-        runner(user_command(user, [python or '/usr/bin/python3', source / 'examples/orange_pi_zero3w_audio.py', 'check']))
+        runner(user_command(user, [python or '/usr/bin/python3', user_source / 'examples/orange_pi_zero3w_audio.py', 'check']))
         print('Audio card identity and non-root permissions passed; no PCM stream opened.')
 
 
-def raspberry(args, source, user, python, runner=command, root=Path('/')):
+def raspberry(args, source, user, python, runner=command, root=Path('/'), user_source=None):
+    user_source = user_source or source
     path = lambda p: root / p.lstrip('/')
     config = next((p for p in (path('/boot/firmware/config.txt'), path('/boot/config.txt')) if p.is_file()), None)
     if not config or not shutil.which('raspi-config'):
@@ -284,8 +288,10 @@ def raspberry(args, source, user, python, runner=command, root=Path('/')):
         else:
             if path('/sys/module/fusion_hat').exists():
                 raise ValueError('A live Pi module has no installed artifact; resolve its ownership before installing.')
-            runner(['make', '-C', source / 'driver', 'all'])
-            runner(['make', '-C', source / 'driver', 'BOOT_ONLY=1', 'install'])
+            headers = path('/lib/modules/' + CORE.run(['uname', '-r']) + '/build')
+            build_options = ['KDIR=' + trusted_headers(headers)] if headers.exists() else []
+            runner(kernel_build(['make', '-C', source / 'driver', *build_options, 'all']))
+            runner(kernel_build(['make', '-C', source / 'driver', *build_options, 'BOOT_ONLY=1', 'install']))
         # Keep overlay scope deterministic even if the existing file ends inside
         # a model-specific section. Back up exact prior content once per change.
         text = config.read_text()
@@ -306,7 +312,7 @@ def raspberry(args, source, user, python, runner=command, root=Path('/')):
             runner(['/usr/bin/python3', '-m', 'pip', 'uninstall', '-y', 'RPi.GPIO', '--break-system-packages'])
         def pip_command(values):
             return user_command(user, values)
-        runner(pip_command([executable, '-m', 'pip', 'install', '--no-deps', str(source), *pip_flags]))
+        runner(pip_command([executable, '-m', 'pip', 'install', '--no-deps', str(user_source), *pip_flags]))
         dependencies = ('from importlib.metadata import requires; import subprocess,sys; '
                         'deps=[r for r in requires("fusion_hat") if not r.lower().startswith("sunfounder-voice-assistant")]; '
                         'subprocess.run([sys.executable,"-m","pip","install",*sys.argv[1:],*deps],check=True)')
@@ -314,25 +320,102 @@ def raspberry(args, source, user, python, runner=command, root=Path('/')):
         uninstall_flags = [] if python else ['--break-system-packages']
         runner(pip_command([executable, '-m', 'pip', 'uninstall', '-y', 'RPi.GPIO', *uninstall_flags]))
         print('Pi Python installed for ' + user.pw_name + ': ' + (python or user.pw_dir + '/.local/bin/fusion_hat (system interpreter, user-site packages)'))
-        completion = runner(user_command(user, [str(Path(python).parent / 'register-python-argcomplete') if python else 'register-python-argcomplete', '-s', 'bash', 'fusion_hat']), capture=True)
-        directory = path('/etc/bash_completion.d')
-        if not directory.exists():
-            directory.mkdir(parents=True, mode=0o755)
-            directory.chmod(0o755)
-        completion_file = directory / 'fusion_hat'
-        completion_file.write_text(completion + '\n')
-        completion_file.chmod(0o644)
+        # Completion generated by the runtime account must never be installed
+        # as shell code in /etc. Keep it entirely in that account's data directory.
+        completion_script = ('from pathlib import Path; import subprocess,sys; '
+                             'p=Path.home()/".local/share/bash-completion/completions"; '
+                             'p.mkdir(parents=True,exist_ok=True); '
+                             'text=subprocess.check_output([sys.argv[1],"-s","bash","fusion_hat"],text=True); '
+                             '(p/"fusion_hat").write_text(text)')
+        register = str(Path(python).parent / 'register-python-argcomplete') if python else 'register-python-argcomplete'
+        runner(user_command(user, [executable, '-c', completion_script, register]))
     if not path('/sys/module/fusion_hat').exists() or not path('/sys/class/fusion_hat/fusion_hat/firmware_version').exists():
         raise Incomplete('Pi driver is not active. Review the installed files and dmesg; reboot explicitly, then rerun this command.')
-    runner(user_command(user, [python or '/usr/bin/python3', '-c', 'from fusion_hat.battery import Battery; print("Core import passed")']))
+    if {'core', 'audio'}.intersection(args.stages):
+        runner(user_command(user, [python or '/usr/bin/python3', '-c', 'from fusion_hat.battery import Battery; print("Core import passed")']))
     if 'audio' in args.stages:
         if not args.check:
-            audio_args = ['bash', source / 'fusion_hat/scripts/setup_fusion_hat_audio.sh', '--skip-test', '--non-actuating', '--runtime-user', user.pw_name]
+            audio_args = ['bash', source / 'fusion_hat/scripts/setup_fusion_hat_audio.sh', '--skip-test', '--non-actuating', '--runtime-user', user.pw_name, '--user-source', str(user_source)]
             if not args.set_audio_defaults:
                 audio_args.append('--keep-defaults')
             runner(audio_args)
         # Verified card identity and permissions are also used by voice checks.
-        runner(user_command(user, ['/usr/bin/python3', source / 'driver/voice_setup.py', '--hardware-check', '--platform', 'raspberry-pi']))
+        runner(user_command(user, ['/usr/bin/python3', user_source / 'driver/voice_setup.py', '--hardware-check', '--platform', 'raspberry-pi']))
+
+
+def copy_inputs(original, target):
+    """Independent copies: never promote Python staging back to root inputs."""
+    target.mkdir()
+    for name in ('driver', 'fusion_hat', 'examples', 'pyproject.toml', 'README.md', 'LICENSE'):
+        item, destination = original / name, target / name
+        if item.is_symlink() or (item.is_dir() and any(p.is_symlink() for p in item.rglob('*'))):
+            raise ValueError('Installer source inputs must not contain symlinks: ' + str(item))
+        if item.is_dir():
+            shutil.copytree(item, destination, ignore=shutil.ignore_patterns(
+                '*.egg-info', '__pycache__', '*.o', '*.ko', '*.ko.*', '*.cmd',
+                '*.dtbo', '*.mod', '*.mod.c', 'Module.symvers', 'modules.order', '.tmp_versions'))
+        else:
+            shutil.copy2(item, destination)
+
+
+def trusted_headers(path):
+    """Resolve once; reject writable build inputs, including symlink targets."""
+    path = Path(path).resolve(strict=True)
+    seen = set()
+    pending = [path]
+    while pending:
+        item = pending.pop()
+        resolved = item.resolve(strict=True)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        for component in (resolved, *resolved.parents):
+            info = component.stat()
+            # /tmp may be sticky, but headers/build inputs must not depend on
+            # any group/world writable location, even a sticky directory.
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError('Kernel headers/build inputs must be root-owned and not group/world writable: ' + str(component))
+        if resolved.is_dir():
+            pending.extend(resolved.iterdir())
+    return str(path)
+
+
+def kernel_build(args):
+    # No user toolchain, make startup files, Python path or shell startup files.
+    return ['env', '-i', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'HOME=/root', 'LANG=C.UTF-8', *map(str, args)]
+
+
+def trusted_temporary_root():
+    temporary_root = Path('/tmp').stat()
+    if temporary_root.st_uid != 0 or (temporary_root.st_mode & 0o022 and not temporary_root.st_mode & 0o1000):
+        raise ValueError('Privileged staging requires root-owned /tmp with sticky protection or no group/world write access.')
+    return '/tmp'
+
+
+@contextmanager
+def staging(user, original=SOURCE):
+    # /tmp's root-owned sticky directory protects these root-owned entries;
+    # do not place privileged inputs under a runtime-user-controlled TMPDIR.
+    directory = trusted_temporary_root()
+    with tempfile.TemporaryDirectory(prefix='fusion-hat-root-', dir=directory) as privileged, \
+         tempfile.TemporaryDirectory(prefix='fusion-hat-user-', dir=directory) as unprivileged:
+        root_directory, user_directory = Path(privileged), Path(unprivileged)
+        source, user_source = root_directory / 'source', user_directory / 'source'
+        copy_inputs(original, source)
+        digest = hashlib.sha256()
+        for path in sorted(source.rglob('*')):
+            if path.is_file():
+                digest.update(str(path.relative_to(source)).encode() + b'\0' + path.read_bytes())
+        print('Source snapshot SHA256: ' + digest.hexdigest())
+        # Root owns every privileged file because it created independent copies.
+        # Explicit modes discard source group/world write bits. Parent remains 700.
+        for path in (source, *source.rglob('*')):
+            path.chmod(0o700 if path.is_dir() or path.stat().st_mode & 0o111 else 0o600)
+        copy_inputs(source, user_source)
+        for path in (user_source, *user_source.rglob('*'), user_directory):
+            os.chown(path, user.pw_uid, user.pw_gid)
+        yield source, user_source
 
 
 def main(argv=None):
@@ -355,28 +438,8 @@ def main(argv=None):
             raise ValueError('--voice requires --venv or --python; no root/system voice environment is selected.')
         resume_command = resume(args, user, python, repo, revision)
         print('Resume command: ' + resume_command)
-        with tempfile.TemporaryDirectory(prefix='fusion-hat-install-') as temporary:
-            scratch = Path(temporary)
-            source = scratch / 'source'
-            # Snapshot includes local changes; builds/pip metadata never touch the
-            # user's checkout. Exclude caches, credentials and local environments.
-            source.mkdir()
-            for name in ('driver', 'fusion_hat', 'examples', 'pyproject.toml', 'README.md', 'LICENSE'):
-                original, target = SOURCE / name, source / name
-                if original.is_dir():
-                    shutil.copytree(original, target, ignore=shutil.ignore_patterns('*.egg-info', '__pycache__', '*.o', '*.ko', '*.ko.*', '*.cmd', '*.dtbo', '*.mod', '*.mod.c', 'Module.symvers', 'modules.order', '.tmp_versions'))
-                else:
-                    shutil.copy2(original, target)
-            digest = hashlib.sha256()
-            for path in sorted(source.rglob('*')):
-                if path.is_file():
-                    digest.update(str(path.relative_to(source)).encode() + b'\0' + path.read_bytes())
-                if not path.is_symlink():
-                    os.chown(path, user.pw_uid, user.pw_gid)
-            os.chown(source, user.pw_uid, user.pw_gid)
-            os.chown(scratch, user.pw_uid, user.pw_gid)
-            print('Source snapshot SHA256: ' + digest.hexdigest())
-            (orange if platform == 'orange-pi' else raspberry)(args, source, user, python)
+        with staging(user) as (source, user_source):
+            (orange if platform == 'orange-pi' else raspberry)(args, source, user, python, user_source=user_source)
             if 'voice' in args.stages:
                 # Service/package selection happens separately from user setup.
                 voice = load('fusion_voice_setup', source / 'driver/voice_setup.py')
@@ -389,7 +452,7 @@ def main(argv=None):
                     options.append('--check')
                 if args.set_audio_defaults:
                     options.append('--set-audio-defaults')
-                command(user_command(user, [python, source / 'driver/voice_setup.py', *options], session=True))
+                command(user_command(user, [python, user_source / 'driver/voice_setup.py', *options], session=True))
         print('Selected stages: files installed and non-actuating software checks passed. Physical playback/capture require operator confirmation.')
         if args.test:
             print('Operator tests: driver/unified-install.md acceptance steps; no playback/recording was performed here.')

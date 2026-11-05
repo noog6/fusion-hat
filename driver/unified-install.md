@@ -45,10 +45,17 @@ sudo bash ./install.sh --runtime-user "$(id -un)" \
 
 The script's source directory wins; a piped script invoked from a checkout's
 root also uses that checkout. No pull, reset, checkout deletion, replacement or
-build cleanup occurs there. Builds and pip packaging metadata go into a private
-snapshot, removed on exit. Only code/package/build inputs are copied, not the
-repository's `.git`, work directories or venv. The installer reports Git HEAD,
-local modification status, and the snapshot's SHA256. Keep that output for review.
+build cleanup occurs there. Root creates a private, root-owned source snapshot
+for privileged scripts, platform imports and kernel builds. A separate runtime-user
+copy is used only for Python packaging, imports and audio checks; root never
+executes that copy or promotes its build outputs into the privileged tree. Both
+directories are removed on exit. Only code/package/build inputs are copied, not the
+repository's `.git`, work directories or venv. Kernel modules are built as root
+in the protected tree, with a clean build environment. Existing headers and their symlink targets must be root-owned and
+not group/world writable; resolve a failure with an administrator-reviewed
+header installation, not by giving the runtime user access to privileged builds.
+The installer reports Git HEAD, local modification status, and the snapshot's
+SHA256. Keep that output for review.
 Existing owned drivers are retained on rerun; a new source snapshot does not
 silently upgrade an already installed kernel module. Replacing an Orange Pi
 installation requires its documented uninstall/reboot procedure.
@@ -74,12 +81,25 @@ reject these source overrides instead of switching trees. The old
 `INSTALLER_BRANCH` shared-utility override is no longer used: neither path
 sources remote shared installer code.
 
-Bootstrap fetches the ref once, checks out its immutable SHA in a private
+Bootstrap fetches the ref once, peels it to a commit (including annotated tags),
+checks out that immutable commit SHA in a private
 `mktemp` directory, and uses that revision's dispatcher, scripts and artifacts
 for the invocation. Cleanup runs on exit/signals. Resume commands pin that SHA,
 so a moving branch cannot change the resumed installation. A failed bootstrap
 can be retried; no user checkout is removed. Local resume commands use the
 original absolute checkout path; retain/review that checkout until completion.
+
+`fusion_hat update` also stays on this fork. Run it from the intended account:
+it passes its active venv interpreter automatically, or accepts an explicit
+selector. Its exit status is the installer's status (including staged exit 3);
+a failed download never starts the installer.
+
+```bash
+/absolute/path/to/.venv/bin/fusion_hat update
+fusion_hat update --python /absolute/path/to/.venv/bin/python --runtime-user "$(id -un)"
+# Equivalent explicit environment selector:
+fusion_hat update --venv /absolute/path/to/.venv --runtime-user "$(id -un)"
+```
 
 ## Stage selection and activation
 
@@ -90,7 +110,7 @@ the listed stages; add `--voice` explicitly if desired.
 | --- | --- |
 | `--core` | Driver/boot configuration and Python library. Orange Pi uses `build-module.sh`, its existing transaction installer and `install-core-python.sh`. Prepared matching vendor headers and verified `i2c0` are prerequisites, not guessed apt packages. |
 | `--audio` | Platform audio hardware configuration, identity and non-root permissions. Orange Pi delegates to the existing overlay installer; no Python voice dependencies or audio server are installed. Pi uses the existing script's new non-actuating mode, configuring only named `fusion_hat` ALSA PCMs, preserving defaults/stack. |
-| `--voice` | Selected venv voice package, existing user audio service, PortAudio imports/enumeration and routing verification. Requires active core/audio first. |
+| `--voice` | Installs Fusion core and pinned voice dependencies in the selected venv, verifies their required dependency graph, existing user service, PortAudio enumeration and routing. Requires active core/audio hardware first. |
 | `--check` | Read-only state/software verification (temporary offline DT composition is allowed). No apt/pip install, service start or default changes. Missing installation/activation remains incomplete. Run an installation command without `--check` to complete missing files. |
 | `--runtime-user USER` | Intended non-root account. Defaults to the invoking user through `SUDO_USER`; direct root login must specify it. No first-user/session guessing. |
 | `--venv /absolute/path` or `--python /absolute/venv/bin/python` | Existing user-writable venv; mutually exclusive. Required for Orange Pi core Python and all voice setups. Interpreter symlinks retain venv identity. No venv is created in root's home. |
@@ -125,7 +145,10 @@ packages use the system interpreter with `--user`, and the CLI is
 `~/.local/bin/fusion_hat`; open a new login shell for the standard user-local PATH.
 No new Python library or voice package is installed into root's home or globally.
 The previous Pi OS `RPi.GPIO` system-package cleanup remains a privileged step;
-venv selection confines Python package cleanup to that venv. After activation, non-streaming audio setup preserves the existing stack
+venv selection confines Python package cleanup to that venv. Completion is
+generated as the runtime account under
+`~/.local/share/bash-completion/completions/fusion_hat`; user-generated shell
+code is never copied into a system completion directory. After activation, non-streaming audio setup preserves the existing stack
 and defaults. The standalone legacy `fusion_hat speaker setup` remains an
 explicit operator command and can open streams/change global audio configuration;
 it is not the unified Orange Pi path.
@@ -162,6 +185,12 @@ by this installer. A missing DBus/user session prints remaining session commands
 and the complete resume command; log in as that user and rerun. Never run
 `sudo systemctl --user` or configure root's PulseAudio instance.
 
+Before voice imports, the existing core Python helper installs the local Fusion
+package with `--no-deps`, plus `evdev` and build tools, into the selected voice
+venv on **both** platforms. This also handles a Pi whose earlier core installation
+used the system interpreter/user site. The helper retains the exact Orange Pi
+Python 3.14.4 check; its explicit Pi mode accepts the selected supported Python.
+The voice checker also installs `packaging` to evaluate dependency requirements.
 The selected interpreter installs
 `sunfounder-voice-assistant` at inspected upstream commit
 **`32d2dae40d47fd6c4fe4180db28cd47e83efd851`**. Its metadata declares
@@ -176,12 +205,20 @@ headers matching the selected Python; read the actual compiler diagnostic and
 `apt-cache policy` rather than substituting mismatched development packages.
 
 Fusion's existing broad dependency metadata includes Pi GPIO and display
-packages, even for its core-only `--no-deps` installation. `pip check` reports
-its exact remaining missing/conflicting requirements; these do not alone prove
-an audio or MCU fault. The stage remains incomplete if metadata checks fail;
-do not install the entire Pi list on Orange Pi just to suppress those messages.
-Other application requirements may independently conflict with the voice
-resolver. Preserve the complete pip output and inventory for diagnosis.
+packages, even for its core-only `--no-deps` installation. Core + voice uses
+Fusion's sysfs/evdev core and the pinned voice application; it does not require
+those optional GPIO/display modules on either managed hardware path. The checker
+verifies Fusion, `evdev`, `packaging`, the voice application and its **entire active
+transitive dependency graph**, including version constraints, Python/platform
+markers and requested extras. Missing/conflicting requirements in that graph
+fail the voice stage. The installed voice VCS revision and imports are also checked.
+
+A whole-venv `pip check` still prints its exact diagnostics, including optional
+Fusion modules and unrelated applications, but those diagnostics do not fail an
+otherwise complete core/voice stage. Review them before using the affected
+features or other applications. A successful voice stage does not claim that
+the entire venv is conflict-free. Do not install the entire Pi GPIO/display list
+on Orange Pi just to suppress unrelated metadata diagnostics.
 
 Routing discovers the HAT by DT ancestry/driver and read/write device access,
 then corroborates Pulse endpoint properties against that actual ALSA card.
@@ -320,17 +357,21 @@ TTS behavior and motor/servo behavior are outside this change.
 
 ## Repository verification
 
-The implementation was checked on cloud Python 3.12 / x86_64: **108 unittest
+The implementation was checked on cloud Python 3.12 / x86_64: **121 unittest
 cases passed, no skips**, including the existing core/audio transaction, rollback,
 policy, permission, stream-boundary and real DTC fixture composition cases. New
 cases exercise supported/rejected identities (including the vendor alias), both
 dispatch paths, bootstrap repo/ref/defaults and cleanup, checkout preservation,
 reboot/rerun stages, runtime user/venv handling, session/stack selection, verified
-microphone/sink routing, recovery receipts and partial failures. Privileged and
-hardware boundaries are mocked; these results are not board validation.
+microphone/sink routing, recovery receipts and partial failures. Review regression
+cases also cover separate privileged/user copies for a different selected account,
+protected kernel build/output paths, untrusted-header rejection, fresh Pi voice
+venv provisioning, optional-versus-required dependency failures and active
+markers/extras, real annotated-tag peeling, and CLI interpreter/exit propagation.
+Privileged and hardware boundaries are mocked; these results are not board validation.
 
 `bash -n`, ShellCheck 0.10, Python compilation and `git diff --check` passed.
-Bash syntax checks passed for executable guide examples (34 blocks; existing
+Bash syntax checks passed for executable guide examples (35 blocks; existing
 illustrative CLI/output blocks are excluded). Sphinx HTML built with the same
 four existing diagnostics as the workspace's earlier build: `_config` import
 warnings and rotary-encoder docstring indentation errors. No changed guide

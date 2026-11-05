@@ -47,21 +47,41 @@ def print_version():
     from ._version import __version__
     print(f"Fusion HAT library version: {__version__}")
 
-def update():
-    """Update fusion-hat by running the installer script."""
-    import os as _os
+def update(python=None, venv=None, runtime_user=None):
+    """Run this fork's installer with the selected/active venv and exact status."""
+    from pathlib import Path
+    import subprocess
+    import sys
     from ._version import __version__
 
-    URL = "https://raw.githubusercontent.com/noog6/fusion-hat/v1/install.sh"
-
-    print("")
-    print(f"  Current version: {__version__}")
-    print(f"  Running installer: {URL}")
-    print("")
-
-    ret = _os.system(f"curl -fsSL {URL} | sudo bash")
-    if ret != 0:
-        print(f"\n  [FAIL] Installer exited with code {ret}")
+    url = "https://raw.githubusercontent.com/noog6/fusion-hat/v1/install.sh"
+    options = []
+    if venv:
+        python = str(Path(venv).expanduser().absolute() / 'bin/python')
+    elif python:
+        python = str(Path(python).expanduser().absolute())
+    elif sys.prefix != sys.base_prefix:
+        # Preserve the venv symlink path instead of resolving to base Python.
+        python = sys.executable
+    if python:
+        options += ['--python', python]
+    if runtime_user:
+        options += ['--runtime-user', runtime_user]
+    print(f"  Current version: {__version__}\n  Running installer: {url}", flush=True)
+    try:
+        # A failed download never starts sudo/bash; no shell pipeline masks it.
+        download = subprocess.run(['curl', '-fsSL', url], check=True, stdout=subprocess.PIPE)
+        result = subprocess.run(['sudo', 'bash', '-s', '--', *options], input=download.stdout)
+        status = result.returncode
+    except subprocess.CalledProcessError as error:
+        status = error.returncode
+    except OSError as error:
+        print(f"  [FAIL] Unable to run installer: {error}")
+        return 1
+    status = status if status >= 0 else 128 - status
+    if status:
+        print(f"  [FAIL] Installer exited with code {status}")
+    return status
 
 def scan_i2c():
     print(f"Scan I2C bus.")
@@ -237,7 +257,11 @@ def main():
     p.set_defaults(_func=lambda a: print_version())
 
     p = sub.add_parser('update', help='Self-update from git')
-    p.set_defaults(_func=lambda a: update())
+    selection = p.add_mutually_exclusive_group()
+    selection.add_argument('--python', help='Existing venv interpreter (defaults to the active venv)')
+    selection.add_argument('--venv', help='Existing venv directory')
+    p.add_argument('--runtime-user', help='Non-root runtime account; required for direct root invocation')
+    p.set_defaults(_func=lambda a: update(python=a.python, venv=a.venv, runtime_user=a.runtime_user))
 
     p = sub.add_parser('scan_i2c', help='Scan I2C bus')
     p.set_defaults(_func=lambda a: scan_i2c())
@@ -274,4 +298,6 @@ def main():
         speaker_parser.print_help()
         return
 
-    args._func(args)
+    result = args._func(args)
+    if args.option == 'update':
+        return result

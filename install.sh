@@ -45,7 +45,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 git init -q "$bootstrap_dir/source"
 git -C "$bootstrap_dir/source" fetch -q --depth=1 "https://github.com/$repository.git" "$requested_ref"
-revision=$(git -C "$bootstrap_dir/source" rev-parse FETCH_HEAD)
+revision=$(git -C "$bootstrap_dir/source" rev-parse 'FETCH_HEAD^{commit}')
 git -C "$bootstrap_dir/source" checkout -q --detach "$revision"
 export FUSION_HAT_BOOTSTRAP_REPOSITORY="$repository" FUSION_HAT_BOOTSTRAP_REVISION="$revision"
 python3 "$bootstrap_dir/source/driver/install.py" "$@"

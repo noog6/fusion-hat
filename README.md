@@ -41,8 +41,9 @@ Pi installation requires core activation before audio installation, then audio
 activation. No installer reboots or opens test streams. Physical playback and
 capture require explicit operator tests in the guide.
 
-The CLI repair/update/speaker-setup commands below describe the Raspberry Pi
-workflow; do not use Pi repair or global audio setup on Orange Pi. Use the
+The CLI repair/speaker-setup commands below describe the Raspberry Pi
+workflow; do not use Pi repair or global audio setup on Orange Pi. CLI `update`
+uses the unified installer and supports explicit or active venv selection. Use the
 [core](driver/orange-pi-zero3w-install.md) and
 [audio](driver/orange-pi-zero3w-audio.md) installers for Orange Pi recovery.
 
@@ -88,8 +89,9 @@ sphinx-apidoc -f -d 1 -e -M -P -T -o source/api ../fusion_hat
 Preserve the unified installer's source revision, stage output and any ownership
 manifest/rollback diagnostic. Follow the [troubleshooting and recovery guide](driver/unified-install.md#troubleshooting-and-recovery)
 before replacing installed files or changing boot configuration. Raspberry Pi
-CLI `update` now retrieves this fork; Orange Pi uses the explicit unified
-command with its runtime-user/venv options.
+CLI `update` retrieves this fork and forwards the active venv, or accepts
+`--python` / `--venv` and `--runtime-user`; its exit status reports incomplete
+stages or failures. The unified command exposes all stage and routing options.
 
 ## CLI Commands
 

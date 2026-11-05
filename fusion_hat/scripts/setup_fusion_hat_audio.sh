@@ -29,9 +29,11 @@ SKIP_DEPS=false
 # workflow below remains available to operators explicitly running speaker setup.
 if [[ " $* " == *" --non-actuating "* ]]; then
     runtime_user=''
+    user_source=''
     while (( $# )); do
         case $1 in
             --runtime-user) runtime_user=${2:?--runtime-user requires USER}; shift ;;
+            --user-source) user_source=${2:?--user-source requires PATH}; shift ;;
             --non-actuating|--skip-test|--keep-defaults) ;;
             *) echo "Unsupported non-actuating audio option: $1" >&2; exit 2 ;;
         esac
@@ -46,8 +48,9 @@ if [[ " $* " == *" --non-actuating "* ]]; then
         apt-get install -y alsa-utils
     fi
     audio_repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+    audio_repo=${user_source:-$audio_repo}
     runtime_home=$(getent passwd "$runtime_user" | cut -d: -f6)
-    sudo -H -u "$runtime_user" -- env -i PATH=/usr/bin:/bin HOME="$runtime_home" \
+    sudo -H -u "$runtime_user" -- env -i -C "$runtime_home" PATH=/usr/bin:/bin HOME="$runtime_home" \
         /usr/bin/python3 "$audio_repo/driver/voice_setup.py" --hardware-check --platform raspberry-pi
     # Only named PCMs; preserve global defaults, user routing and existing stack.
     alsa_named=/etc/alsa/conf.d/99-fusion-hat.conf
