@@ -644,7 +644,7 @@ TTS behavior and motor/servo behavior are outside this change.
 
 ## Repository verification
 
-The implementation was checked on cloud Python 3.12 / x86_64: **159 unittest
+The implementation was checked on cloud Python 3.12 / x86_64: **164 unittest
 cases passed, no skips**, including the existing core/audio transaction, rollback,
 policy, permission, stream-boundary and real DTC fixture composition cases. New
 cases exercise supported/rejected identities (including the vendor alias), both
@@ -667,7 +667,14 @@ probe results, actionable child failures and visible routing recovery/warnings.
 Idle-policy cases cover native/PipeWire separation, actual-microphone identity,
 active stream/monitor protection, preserved module arguments, process-bound
 receipts, copied-helper reapplication after a simulated server restart, read-only
-checks, owned updates/removal and partial-failure rollback. The generated user
+checks, owned updates/removal and partial-failure rollback. Native PulseAudio 17
+module JSON omits module IDs; discovery and rollback use its tab-separated short
+listing instead, including empty arguments. Captured native output fixtures
+cover that contract, and malformed server data remains an incomplete stage with
+rollback when properties have already changed. A separate real PulseAudio 17.0
+virtual-server check verified module IDs/arguments, property updates/restoration
+and module unload/reload using only a null sink, without hardware access.
+The generated user
 unit also passed offline `systemd-analyze --user verify` with a fixture PulseAudio
 unit; no service was started by that check.
 Privileged and hardware boundaries are mocked; these results are not board validation.

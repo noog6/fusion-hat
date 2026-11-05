@@ -307,7 +307,7 @@ def main():
             return 3
         print('Voice software checks passed. Physical speech and post-login/unattended persistence require operator acceptance.')
         return 0
-    except (OSError, ImportError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, ImportError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:
         print('Voice stage incomplete: ' + str(error), file=sys.stderr)
         print('To provision missing Fusion/core/voice packages in this selected venv, rerun --voice without --check.', file=sys.stderr)
         print('For PulseAudio_Initialize / sounddevice import failures, check pactl info and systemctl --user status in the runtime session before changing PortAudio or reinstalling hardware. For native-extension build failures inspect the compiler error, selected Python development headers and apt-cache policy portaudio19-dev.', file=sys.stderr)

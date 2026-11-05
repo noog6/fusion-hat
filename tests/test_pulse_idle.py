@@ -51,8 +51,12 @@ class Server:
         if args[:4] == ['pactl', '-f', 'json', 'info']:
             return json.dumps(self.info)
         if args[:4] == ['pactl', '-f', 'json', 'list']:
-            return json.dumps(dict(sinks=[self.sink, self.hdmi], sources=[self.source, self.monitor], modules=self.modules,
+            # PulseAudio 17 module JSON has no index, unlike endpoints/streams.
+            json_modules = [{key: value for key, value in module.items() if key != 'index'} for module in self.modules]
+            return json.dumps(dict(sinks=[self.sink, self.hdmi], sources=[self.source, self.monitor], modules=json_modules,
                                    **self.streams)[args[4]])
+        if args == ['pactl', 'list', 'short', 'modules']:
+            return ''.join(f'{module["index"]}\t{module["name"]}\t{module["argument"]}\t\n' for module in self.modules)
         if args[0] == 'pacmd':
             endpoint = self.sink if args[1] == 'update-sink-proplist' else self.source
             assert endpoint['name'] == args[2]
@@ -121,6 +125,37 @@ class PulseIdle(unittest.TestCase):
         self.assertEqual(self.server.modules[0]['argument'], 'timeout=7')
         self.assertEqual(self.paths['active'].stat().st_mode & 0o777, 0o600)
         self.assertFalse(any('default' in ' '.join(command) or 'rate' in ' '.join(command) for command in self.server.calls))
+
+    def test_real_module_contract_does_not_depend_on_missing_json_index(self):
+        fixtures = ROOT / 'tests/fixtures'
+        document = json.loads((fixtures / 'pulseaudio17-modules.json').read_text())
+        self.assertNotIn('index', document[0])
+        listing = (fixtures / 'pulseaudio17-modules.tsv').read_text()
+        self.server.modules = POLICY.list_modules(Mock(return_value=listing.strip()))
+        self.assertEqual(self.server.modules[0]['name'], document[0]['name'])
+        self.assertEqual(self.server.modules[0]['argument'], document[0]['argument'])
+        self.assertNotIn('index', json.loads(self.server(['pactl', '-f', 'json', 'list', 'modules'], capture=True))[0])
+        self.configure()
+        self.configure(check=True)
+        self.assertEqual(self.server.modules[0]['argument'], '')
+        self.assertEqual(POLICY.snapshot(self.server)['module'], self.server.modules[0]['index'])
+
+    def test_short_module_parser_empty_arguments_and_multi_digit_ids(self):
+        runner = Mock(return_value='0\tmodule-device-restore\t\t\n21\tmodule-suspend-on-idle\ttimeout=7\t\n')
+        result = POLICY.list_modules(runner)
+        self.assertEqual(result, [dict(index=0, name='module-device-restore', argument=''),
+                                  dict(index=21, name=POLICY.MODULE, argument='timeout=7')])
+
+    def test_bad_module_listing_stops_before_policy_files_or_live_changes(self):
+        for text in ('module-suspend-on-idle\t13\t', 'bad\tmodule-suspend-on-idle\t', '13'):
+            def runner(args, capture=False):
+                if args == ['pactl', 'list', 'short', 'modules']:
+                    return text
+                return self.server(args, capture)
+            with self.subTest(text=text), self.assertRaisesRegex(RuntimeError, 'Unexpected pactl short module'):
+                POLICY.configure(runner=runner, home=self.home)
+            self.assertFalse(self.paths['manifest'].exists())
+        self.assertFalse(any(command[0] == 'pacmd' for command in self.server.calls))
 
     def test_current_receipt_skips_reload_even_with_active_hat_client(self):
         self.apply()
@@ -197,6 +232,16 @@ class PulseIdle(unittest.TestCase):
             self.apply()
         self.assertEqual(self.server.sink['properties'][POLICY.PROPERTY], '12')
         self.assertEqual(self.server.modules[0]['index'], 13)
+        self.assertFalse(self.paths['active'].exists())
+
+    def test_malformed_server_data_after_property_changes_rolls_back(self):
+        before = POLICY.snapshot(self.server)
+        with patch.object(POLICY, 'snapshot', side_effect=[before, KeyError('index')]):
+            with self.assertRaisesRegex(RuntimeError, 'prior HAT properties/module policy restored'):
+                self.apply()
+        self.assertEqual(self.server.sink['properties'][POLICY.PROPERTY], '')
+        self.assertEqual(self.server.source['properties'][POLICY.PROPERTY], '')
+        self.assertEqual(self.server.modules[0]['index'], before['module'])
         self.assertFalse(self.paths['active'].exists())
 
     def test_module_load_failure_restores_inheritance_and_original_arguments(self):
@@ -315,6 +360,19 @@ class PulseIdle(unittest.TestCase):
         with patch.object(POLICY.subprocess, 'run', return_value=Mock(stdout='ok')) as child:
             self.assertEqual(POLICY.run(['pactl', 'info'], capture=True), 'ok')
         self.assertEqual(child.call_args.kwargs['env']['PULSE_SERVER'], f'unix:/run/user/{os.getuid()}/pulse/native')
+
+    def test_voice_preflight_reports_bad_server_data_without_traceback_or_pip(self):
+        errors = io.StringIO()
+        with patch.object(VOICE.os, 'geteuid', return_value=1000), \
+             patch.object(VOICE.sys, 'prefix', '/venv'), patch.object(VOICE.sys, 'base_prefix', '/usr'), \
+             patch.object(VOICE.sys, 'argv', ['voice_setup.py', '--platform', 'orange-pi', '--hat-idle-release']), \
+             patch.object(VOICE, 'hardware_card', return_value=('7', 'fusionhataudio')), \
+             patch.object(VOICE, 'configure_idle_policy', side_effect=KeyError('index')), \
+             patch.object(VOICE, 'install_python') as install, contextlib.redirect_stderr(errors):
+            self.assertEqual(VOICE.main(), 3)
+        self.assertIn('Voice stage incomplete:', errors.getvalue())
+        self.assertNotIn('Traceback', errors.getvalue())
+        install.assert_not_called()
 
     def test_missing_managed_pulse_service_is_actionable(self):
         # Exercise the real session/unit identity gate without hardware access.

@@ -95,6 +95,20 @@ def service_identity(runner):
     return [pid, start, Path('/proc/sys/kernel/random/boot_id').read_text().strip()]
 
 
+def list_modules(runner):
+    # PulseAudio 17 omits module IDs from JSON, including the long form.
+    # Its documented short text form is index<TAB>name<TAB>arguments<TAB>.
+    text = runner(['pactl', 'list', 'short', 'modules'], capture=True)
+    modules = []
+    for line in text.splitlines():
+        fields = line.split('\t')
+        if len(fields) < 2 or not re.fullmatch(r'[0-9]+', fields[0]) or not fields[1]:
+            raise RuntimeError('Unexpected pactl short module listing; inspect pactl list short modules before configuring policy.')
+        modules.append(dict(index=int(fields[0]), name=fields[1],
+                            argument=fields[2] if len(fields) > 2 else ''))
+    return modules
+
+
 def snapshot(runner=run):
     info = json.loads(runner(['pactl', '-f', 'json', 'info'], capture=True))
     if info.get('server_name') != 'pulseaudio' or not str(info.get('server_version', '')).startswith('17.'):
@@ -115,7 +129,7 @@ def snapshot(runner=run):
         if kind == 'source':
             result['source_indexes'] = [item['index']] + [entry['index'] for entry in items
                 if str(entry.get('monitor_of_sink')) == str(result['sink']['index'])]
-    modules = json.loads(runner(['pactl', '-f', 'json', 'list', 'modules'], capture=True))
+    modules = list_modules(runner)
     matches = [module for module in modules if module['name'] == MODULE]
     if len(matches) != 1:
         raise RuntimeError('Expected exactly one idle module; inspect pactl list short modules before configuring policy.')
@@ -175,7 +189,7 @@ def apply(runner=run, home=None):
                 not all(str(after[kind]['previous']) == '0' for kind in ('sink', 'source'))):
             raise RuntimeError('HAT idle-policy verification failed after reload.')
         json_write(paths['active'], signature(after))
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:
         failures = []
         for kind in ('sink', 'source'):
             try:
@@ -184,7 +198,7 @@ def apply(runner=run, home=None):
                 failures.append(str(rollback))
         if unloaded:
             try:
-                modules = json.loads(runner(['pactl', '-f', 'json', 'list', 'modules'], capture=True))
+                modules = list_modules(runner)
                 for module in modules:
                     if module['name'] == MODULE and str(module['index']) == loaded_index:
                         runner(['pactl', 'unload-module', str(module['index'])])
@@ -275,7 +289,7 @@ def configure(check=False, runner=run, home=None):
         runner(['systemctl', '--user', 'enable', UNIT])
         runner(['systemctl', '--user', 'restart', UNIT])
         status(runner, home)
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:
         failures = []
         if not enabled:
             for command in ('disable', 'stop'):
