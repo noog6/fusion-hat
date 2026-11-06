@@ -1,6 +1,6 @@
 # Fusion Hat
 
-Fusion Hat Python library for Raspberry Pi and Orange Pi.
+Experimental fork of SunFounder’s Fusion HAT project. This fork retains the Raspberry Pi OS installation path and adds experimental support for a directly mounted Fusion HAT+ on the Orange Pi Zero 3W (Allwinner A733). Core, audio, and wake-triggered voice were tested on that board after a fresh Armbian install, the documented prerequisite steps, and a reboot. See the [unified installation guide](driver/unified-install.md) for the exact tested configuration and Raspberry Pi regression status.
 
 Quick Links:
 
